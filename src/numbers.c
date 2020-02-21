@@ -211,28 +211,44 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 
 				-- ctx->vals_index;
 				if (number <= lhs) {
-					value = ctx->vals[ctx->vals_index - 1] = lhs + number;
-					push_op(ctx, OpAdd, value);
-					solve_next(ctx);
-					pop_op(ctx);
-
-					if (lhs != number) {
-						value = ctx->vals[ctx->vals_index - 1] = lhs - number;
-						push_op(ctx, OpSub, value);
+					// only emit (X + 1) + 2 and not (X + 2) + 1
+					if (ctx->ops[ctx->ops_index - 2].op != OpAdd || ctx->ops[ctx->ops_index - 3].op != OpVal || ctx->ops[ctx->ops_index - 3].value <= number) {
+						value = ctx->vals[ctx->vals_index - 1] = lhs + number;
+						push_op(ctx, OpAdd, value);
 						solve_next(ctx);
 						pop_op(ctx);
 					}
 
-					value = ctx->vals[ctx->vals_index - 1] = lhs * number;
-					push_op(ctx, OpMul, value);
-					solve_next(ctx);
-					pop_op(ctx);
+					// only emit (X - 1) - 2 and not (X - 2) - 1
+					if (ctx->ops[ctx->ops_index - 2].op != OpSub || ctx->ops[ctx->ops_index - 3].op != OpVal || ctx->ops[ctx->ops_index - 3].value <= number) {
+						if (lhs != number) {
+							value = ctx->vals[ctx->vals_index - 1] = lhs - number;
+							push_op(ctx, OpSub, value);
+							solve_next(ctx);
+							pop_op(ctx);
+						}
+					}
 
-					if (lhs % number == 0) {
-						value = ctx->vals[ctx->vals_index - 1] = lhs / number;
-						push_op(ctx, OpDiv, value);
-						solve_next(ctx);
-						pop_op(ctx);
+					// only emit (X * 1) * 2 and not (X * 2) * 1
+					if (ctx->ops[ctx->ops_index - 2].op != OpMul || ctx->ops[ctx->ops_index - 3].op != OpVal || ctx->ops[ctx->ops_index - 3].value <= number) {
+						// X * 1 is useless
+						if (number != 1) {
+							value = ctx->vals[ctx->vals_index - 1] = lhs * number;
+							push_op(ctx, OpMul, value);
+							solve_next(ctx);
+							pop_op(ctx);
+						}
+					}
+
+					// only emit (X / 1) / 2 and not (X / 2) / 1
+					if (ctx->ops[ctx->ops_index - 2].op != OpDiv || ctx->ops[ctx->ops_index - 3].op != OpVal || ctx->ops[ctx->ops_index - 3].value <= number) {
+						// X / 1 is useless
+						if (number != 1 && lhs % number == 0) {
+							value = ctx->vals[ctx->vals_index - 1] = lhs / number;
+							push_op(ctx, OpDiv, value);
+							solve_next(ctx);
+							pop_op(ctx);
+						}
 					}
 				}
 				++ ctx->vals_index;
