@@ -4,8 +4,28 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <getopt.h>
+#include <pthread.h>
 
 #include "panic.h"
+
+#if defined(_WIN16) || defined(_WIN32) || defined(_WIN64)
+#define __WINDOWS__
+#endif
+
+#if !defined(__WINDOWS__)
+#include <unistd.h>
+#endif
+
+#ifdef _SC_NPROCESSORS_ONLN
+#	define HAS_GET_CPU_COUNT
+static size_t get_cpu_count() {
+	const long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+	if (nprocs < 0) {
+		panice("getting number of CPUs/cores");
+	}
+	return (size_t)nprocs;
+}
+#endif
 
 typedef uint64_t Number;
 
@@ -28,17 +48,18 @@ typedef struct ElementS {
 } Element;
 
 typedef struct NumbersCtxS {
-	Number        target;
-	const Number *numbers;
-	bool         *used;
-	size_t        count;
-	Element      *ops;
-	size_t        ops_size;
-	size_t        ops_index;
-	Number       *vals;
-	size_t        vals_size;
-	size_t        vals_index;
-	PrintStyle    print_style;
+	Number           target;
+	const Number    *numbers;
+	bool            *used;
+	size_t           count;
+	Element         *ops;
+	size_t           ops_size;
+	size_t           ops_index;
+	Number          *vals;
+	size_t           vals_size;
+	size_t           vals_index;
+	PrintStyle       print_style;
+	pthread_mutex_t *iolock;
 } NumbersCtx;
 
 static void push_op(NumbersCtx *ctx, Op op, Number value) {
@@ -142,16 +163,33 @@ static void print_solution_expr(const NumbersCtx *ctx) {
 	putchar('\n');
 }
 
-static void solve_next(NumbersCtx *ctx) {
+static inline void solve_next(NumbersCtx *ctx);
+
+static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_index) {
 	if (ctx->vals_index == 1 && ctx->target == ctx->vals[0]) {
+		int errnum = 0;
+		if (ctx->iolock) {
+			errnum = pthread_mutex_lock(ctx->iolock);
+			if (errnum != 0) {
+				panicf("%s: locking io mutex", strerror(errnum));
+			}
+		}
+
 		switch (ctx->print_style) {
 			case PrintRpn:  print_solution_rpn(ctx);  break;
 			case PrintExpr: print_solution_expr(ctx); break;
 			default: assert(false);
 		}
+
+		if (ctx->iolock) {
+			errnum = pthread_mutex_unlock(ctx->iolock);
+			if (errnum != 0) {
+				panicf("%s: unlocking io mutex", strerror(errnum));
+			}
+		}
 	}
 
-	for (size_t index = 0; index < ctx->count; ++ index) {
+	for (size_t index = start_index; index < end_index; ++ index) {
 		if (!ctx->used[index]) {
 			ctx->used[index] = true;
 			const Number number = ctx->numbers[index];
@@ -202,46 +240,113 @@ static void solve_next(NumbersCtx *ctx) {
 	}
 }
 
-void solve(const Number target, const Number numbers[], const size_t count, PrintStyle print_style) {
+void solve_next(NumbersCtx *ctx) {
+	solve_next_range(ctx, 0, ctx->count);
+}
+
+typedef struct ThreadCtxS {
+	NumbersCtx ctx;
+	size_t start_index;
+	size_t end_index;
+	pthread_t thread;
+} ThreadCtx;
+
+static void* worker_proc(void *ptr) {
+	ThreadCtx *worker = (ThreadCtx*)ptr;
+	solve_next_range(&worker->ctx, worker->start_index, worker->end_index);
+	return NULL;
+}
+
+void solve(const Number target, const Number numbers[], const size_t count, size_t threads, PrintStyle print_style) {
 	if (count == 0) {
 		panicf("need at least one number");
 	}
+
+	if (threads == 0) {
+		panicf("need at least one thread");
+	}
+
+	if (threads > count) {
+		threads = count;
+	}
+
 	const size_t ops_size = count + count - 1;
-	Element *ops = calloc(ops_size, sizeof(Element));
-	if (!ops) {
-		panice("allocating operand stack of size %zu", ops_size);
-	}
-
 	const size_t vals_size = count;
-	Number *vals = calloc(vals_size, sizeof(Number));
-	if (!vals) {
-		panice("allocating value stack of size %zu", vals_size);
+
+	ThreadCtx *workers = calloc(threads, sizeof(ThreadCtx));
+	if (!workers) {
+		panice("allocating contexts %zu", threads);
 	}
 
-	bool *used = calloc(count, sizeof(Number));
-	if (!used) {
-		panice("allocating used array of size %zu", count);
+	pthread_mutex_t iolock;
+	int errnum = pthread_mutex_init(&iolock, NULL);
+	if (errnum != 0) {
+		panicf("%s: initializing io mutex", strerror(errnum));
 	}
 
-	NumbersCtx ctx = {
-		.target      = target,
-		.numbers     = numbers,
-		.used        = used,
-		.count       = count,
-		.ops         = ops,
-		.ops_size    = ops_size,
-		.ops_index   = 0,
-		.vals        = vals,
-		.vals_size   = vals_size,
-		.vals_index  = 0,
-		.print_style = print_style,
-	};
-	
-	solve_next(&ctx);
+	const size_t stride = 1 + ((count - 1) / threads);
+	size_t index = 0;
+	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
+		Element *ops = calloc(ops_size, sizeof(Element));
+		if (!ops) {
+			panice("allocating operand stack of size %zu", ops_size);
+		}
 
-	free(ops);
-	free(vals);
-	free(used);
+		Number *vals = calloc(vals_size, sizeof(Number));
+		if (!vals) {
+			panice("allocating value stack of size %zu", vals_size);
+		}
+
+		bool *used = calloc(count, sizeof(Number));
+		if (!used) {
+			panice("allocating used array of size %zu", count);
+		}
+
+		ThreadCtx *worker = &workers[thread_index];
+		worker->start_index = index;
+		index += stride;
+		worker->end_index = index;
+		if (worker->end_index > count) {
+			worker->end_index = count;
+		}
+
+		worker->ctx = (NumbersCtx){
+			.target      = target,
+			.numbers     = numbers,
+			.used        = used,
+			.count       = count,
+			.ops         = ops,
+			.ops_size    = ops_size,
+			.ops_index   = 0,
+			.vals        = vals,
+			.vals_size   = vals_size,
+			.vals_index  = 0,
+			.print_style = print_style,
+			.iolock      = &iolock,
+		};
+
+		errnum = pthread_create(&worker->thread, NULL, &worker_proc, worker);
+		if (errnum != 0) {
+			panicf("%s: starting worker therad %zu", strerror(errnum), thread_index);
+		}
+	}
+
+	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
+		ThreadCtx *worker = &workers[thread_index];
+		const int errnum = pthread_join(worker->thread, NULL);
+		if (errnum != 0) {
+			fprintf(stderr, "wating for worker thread to end: %s\n", strerror(errnum));
+		}
+
+		free(worker->ctx.ops);
+		free(worker->ctx.vals);
+		free(worker->ctx.used);
+	}
+
+	errnum = pthread_mutex_destroy(&iolock);
+	if (errnum != 0) {
+		panicf("%s: destroying io mutex", strerror(errnum));
+	}
 }
 
 static void usage(int argc, char *const argv[]) {
@@ -250,23 +355,37 @@ static void usage(int argc, char *const argv[]) {
 		"\n"
 		"OPTIONS:\n"
 		"\n"
-		"\t-h, --help    Print this help message.\n"
-		"\t-r, --rpn     Print solutions in reverse Polish notation.\n"
-		"\t-e, --expr    Print solutions in usual notation (default).\n"
+		"\t-h, --help             Print this help message.\n"
+#ifdef HAS_GET_CPU_COUNT
+		"\t-t, --threads=COUNT    Spawn COUNT threads. Uses number of CPUs per default.\n"
+#else
+		"\t-t, --threads=COUNT    Spawn COUNT threads. (default is number count)\n"
+#endif
+		"\t-r, --rpn              Print solutions in reverse Polish notation.\n"
+		"\t-e, --expr             Print solutions in usual notation (default).\n"
 		"\n"
 	);
 }
 
 int main(int argc, char *argv[]) {
 	struct option long_options[] = {
-		{"help",  no_argument, 0, 'h'},
-		{"rpn",   no_argument, 0, 'r'},
-		{"expr",  no_argument, 0, 'e'},
-		{0,                 0, 0,  0 },
+		{"help",    no_argument,       0, 'h'},
+		{"threads", required_argument, 0, 't'},
+		{"rpn",     no_argument,       0, 'r'},
+		{"expr",    no_argument,       0, 'e'},
+		{0,         0,                 0,  0 },
 	};
 
 	PrintStyle print_style = PrintExpr;
 
+
+#ifdef HAS_GET_CPU_COUNT
+	size_t threads = get_cpu_count();
+#else
+	size_t threads = 0;
+#endif
+
+	char *endptr = NULL;
 	for(;;) {
 		int c = getopt_long(argc, argv, "hue", long_options, NULL);
 		if (c == -1)
@@ -285,6 +404,14 @@ int main(int argc, char *argv[]) {
 				print_style = PrintExpr;
 				break;
 
+			case 't':
+				endptr = NULL;
+				threads = strtoul(optarg, &endptr, 10);
+				if (!*optarg || *endptr || threads == 0) {
+					panice("illegal thread count: %s", optarg);
+				}
+				break;
+
 			case '?':
 				usage(argc, argv);
 				return 1;
@@ -296,7 +423,7 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	char *endptr = NULL;
+	endptr = NULL;
 	const Number target = strtoul(argv[optind], &endptr, 10);
 	if (!*argv[optind] || *endptr || target == 0) {
 		panice("target is not a valid numbers game number: %s", argv[optind]);
@@ -304,6 +431,13 @@ int main(int argc, char *argv[]) {
 	++ optind;
 
 	const size_t count = argc - optind;
+
+#ifndef HAS_GET_CPU_COUNT
+	if (threads == 0) {
+		threads = count;
+	}
+#endif
+
 	Number *numbers = calloc(count, sizeof(Number));
 	if (!numbers) {
 		panice("allocating numbers array of size %zu", count);
@@ -319,7 +453,7 @@ int main(int argc, char *argv[]) {
 		numbers[index - optind] = number;
 	}
 
-	solve(target, numbers, count, print_style);
+	solve(target, numbers, count, threads, print_style);
 	free(numbers);
 
 	return 0;

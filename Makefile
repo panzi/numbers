@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -O2 -Wextra -Werror -std=gnu11
+CFLAGS=-Wall -O2 -Wextra -Werror -std=gnu11 -lpthread
 
 ifeq ($(DEBUG),ON)
 	CFLAGS+=-g -DDEBUG
