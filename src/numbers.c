@@ -407,7 +407,6 @@ int main(int argc, char *argv[]) {
 
 	PrintStyle print_style = PrintExpr;
 
-
 #ifdef HAS_GET_CPU_COUNT
 	size_t threads = get_cpu_count();
 #else
@@ -416,7 +415,7 @@ int main(int argc, char *argv[]) {
 
 	char *endptr = NULL;
 	for(;;) {
-		int c = getopt_long(argc, argv, "hue", long_options, NULL);
+		int c = getopt_long(argc, argv, "ht:rep", long_options, NULL);
 		if (c == -1)
 			break;
 
