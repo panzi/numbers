@@ -7,9 +7,12 @@ else
 	CFLAGS+=-DNDEBUG
 endif
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: build/numbers
+
+test: build/numbers
+	./test.py
 
 build/numbers: build/numbers.o
 	$(CC) $(CFLAGS) $< -o $@
