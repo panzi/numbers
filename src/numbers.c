@@ -215,7 +215,7 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 					const Element *lhs_rhs_op = &ctx->ops[ctx->ops_index - 3];
 					// only emit (X + 1) + 2 and not (X + 2) + 1
 					// only emit (X + Y) - Z and not (X - Z) + Y
-					if (lhs_op->op != OpSub && (lhs_op->op != OpAdd || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number)) {
+					if (ctx->ops_index < 2 || (lhs_op->op != OpSub && (lhs_op->op != OpAdd || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number))) {
 						value = ctx->vals[ctx->vals_index - 1] = lhs + number;
 						push_op(ctx, OpAdd, value);
 						solve_next(ctx);
@@ -223,7 +223,7 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 					}
 
 					// only emit (X - 1) - 2 and not (X - 2) - 1
-					if (lhs_op->op != OpSub || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number) {
+					if (ctx->ops_index < 2 || (lhs_op->op != OpSub || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number)) {
 						if (lhs != number) {
 							value = ctx->vals[ctx->vals_index - 1] = lhs - number;
 							push_op(ctx, OpSub, value);
@@ -234,7 +234,7 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 
 					// only emit (X * 2) * 3 and not (X * 3) * 2
 					// only emit (X * Y) / Z and not (X / Z) * Y
-					if (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number)) {
+					if (ctx->ops_index < 2 || (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number))) {
 						// X * 1 is useless
 						if (number != 1) {
 							value = ctx->vals[ctx->vals_index - 1] = lhs * number;
@@ -245,7 +245,7 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 					}
 
 					// only emit (X / 2) / 3 and not (X / 3) / 21
-					if (lhs_op->op != OpDiv || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number) {
+					if (ctx->ops_index < 2 || (lhs_op->op != OpDiv || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number)) {
 						// X / 1 is useless
 						if (number != 1 && lhs % number == 0) {
 							value = ctx->vals[ctx->vals_index - 1] = lhs / number;
