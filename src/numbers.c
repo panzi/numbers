@@ -370,6 +370,8 @@ void solve(const Number target, const Number numbers[], const size_t count, size
 		free(worker->ctx.used);
 	}
 
+	free(workers);
+
 	errnum = pthread_mutex_destroy(&iolock);
 	if (errnum != 0) {
 		panicf("%s: destroying io mutex", strerror(errnum));
