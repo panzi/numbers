@@ -40,6 +40,7 @@ typedef enum OpE {
 typedef enum PrintStyleE {
 	PrintRpn,
 	PrintExpr,
+	PrintParen,
 } PrintStyle;
 
 typedef struct ElementS {
@@ -130,11 +131,16 @@ static void print_expr(const NumbersCtx *ctx, size_t index) {
 		const int lhs_precedence  = get_precedence(ctx->ops[lhs_index - 1].op);
 		const int rhs_precedence  = get_precedence(ctx->ops[index - 1].op);
 
-		if (lhs_precedence < this_precedence) {
+		const bool left_paren = lhs_precedence < this_precedence ||
+			(ctx->print_style == PrintParen && ctx->ops[lhs_index - 1].op != OpVal);
+		const bool right_paren = rhs_precedence < this_precedence ||
+			(ctx->print_style == PrintParen && ctx->ops[index - 1].op != OpVal);
+
+		if (left_paren) {
 			putchar('(');
 		}
 		print_expr(ctx, lhs_index - 1);
-		if (lhs_precedence < this_precedence) {
+		if (left_paren) {
 			putchar(')');
 		}
 
@@ -146,11 +152,11 @@ static void print_expr(const NumbersCtx *ctx, size_t index) {
 			default: assert(false);
 		}
 
-		if (rhs_precedence < this_precedence) {
+		if (right_paren) {
 			putchar('(');
 		}
 		print_expr(ctx, index - 1);
-		if (rhs_precedence < this_precedence) {
+		if (right_paren) {
 			putchar(')');
 		}
 	}
@@ -176,8 +182,9 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 		}
 
 		switch (ctx->print_style) {
-			case PrintRpn:  print_solution_rpn(ctx);  break;
-			case PrintExpr: print_solution_expr(ctx); break;
+			case PrintRpn:   print_solution_rpn(ctx);  break;
+			case PrintExpr:  print_solution_expr(ctx); break;
+			case PrintParen: print_solution_expr(ctx); break;
 			default: assert(false);
 		}
 
@@ -363,6 +370,7 @@ static void usage(int argc, char *const argv[]) {
 #endif
 		"\t-r, --rpn              Print solutions in reverse Polish notation.\n"
 		"\t-e, --expr             Print solutions in usual notation (default).\n"
+		"\t-p, --paren            Like --expr but never skip parenthesis.\n"
 		"\n"
 	);
 }
@@ -373,6 +381,7 @@ int main(int argc, char *argv[]) {
 		{"threads", required_argument, 0, 't'},
 		{"rpn",     no_argument,       0, 'r'},
 		{"expr",    no_argument,       0, 'e'},
+		{"paren",   no_argument,       0, 'p'},
 		{0,         0,                 0,  0 },
 	};
 
@@ -402,6 +411,10 @@ int main(int argc, char *argv[]) {
 
 			case 'e':
 				print_style = PrintExpr;
+				break;
+
+			case 'p':
+				print_style = PrintParen;
 				break;
 
 			case 't':

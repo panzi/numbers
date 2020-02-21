@@ -11,3 +11,4 @@ Countdown numbers game solver.
         -t, --threads=COUNT    Spawn COUNT threads. Uses number of CPUs per default.
         -r, --rpn              Print solutions in reverse Polish notation.
         -e, --expr             Print solutions in usual notation (default).
+        -p, --paren            Like --expr but never skip parenthesis.
