@@ -324,7 +324,7 @@ void solve(const Number target, const Number numbers[], const size_t count, size
 			panice("allocating value stack of size %zu", vals_size);
 		}
 
-		bool *used = calloc(count, sizeof(Number));
+		bool *used = calloc(count, sizeof(bool));
 		if (!used) {
 			panice("allocating used array of size %zu", count);
 		}
