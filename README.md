@@ -3,7 +3,17 @@ numbers
 
 Countdown numbers game solver.
 
-    Usage: numbers [OPTIONS] TARGET NUMBER...
+Build
+-----
+
+    git clone https://github.com/panzi/numbers.git
+    cd numbers
+    make
+
+Usage
+-----
+
+    Usage: ./build/numbers [OPTIONS] TARGET NUMBER...
 
     OPTIONS:
 
