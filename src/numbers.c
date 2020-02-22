@@ -203,58 +203,89 @@ static inline void solve_vals(NumbersCtx *ctx) {
 
 static void solve_ops(NumbersCtx *ctx) {
 	if (ctx->vals_index > 1) {
-		const Number rhs = ctx->vals[ctx->vals_index - 1];
 		const Number lhs = ctx->vals[ctx->vals_index - 2];
+		const Number rhs = ctx->vals[ctx->vals_index - 1];
 		Number value = 0;
 
 		-- ctx->vals_index;
 		if (lhs >= rhs) {
-			const Element *lhs_op = &ctx->ops[ctx->ops_index - 1];
-			// const Element *lhs_rhs_op = &ctx->ops[ctx->ops_index - 2];
-			// TODO: only emit (X + 1) + 2 and not (X + 2) + 1
-			// TODO: only emit (X + Y) - Z and not (X - Z) + Y
-			if (ctx->ops_index < 1 || (lhs_op->op != OpSub && lhs_op->op != OpAdd)) {
-				value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
-				push_op(ctx, OpAdd, value);
-				test_solution(ctx);
-				solve_ops(ctx);
-				solve_vals(ctx);
-				pop_op(ctx);
-
-				// TODO: only emit (X - 1) - 2 and not (X - 2) - 1
-				if (lhs != rhs) {
-					value = ctx->vals[ctx->vals_index - 1] = lhs - rhs;
-					push_op(ctx, OpSub, value);
+			// intermediate reuslts need to be in descending order
+			const Element *top_op = &ctx->ops[ctx->ops_index - 1];
+			//   discard  ==    use
+			// X Y Z + +  ==  X Y + Z +
+			// X Y Z - +  ==  Y Z - X +
+			// X Y Z + -  ==  X Y - Z -
+			// X Y Z - -  ==  X Y - Z +  EXCEPT FOR WHEN X - Y WOULD BE NEGATIVE!!
+			//                           Negative intermediate results are forbidden.
+			if (top_op->op != OpAdd) {
+				if (top_op->op != OpSub && !(top_op->op == OpVal &&
+				      ctx->ops[ctx->ops_index - 2].op == OpAdd &&
+				      ctx->ops[ctx->ops_index - 3].op == OpVal &&
+				      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+					// chains of additions need to be in descending order
+					value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
+					push_op(ctx, OpAdd, value);
 					test_solution(ctx);
 					solve_ops(ctx);
 					solve_vals(ctx);
 					pop_op(ctx);
+				}
+
+				// TODO: if ((top_op->op != OpSub || lhs < (lhs of rhs)) && lhs != rhs) {
+				if (lhs != rhs) {
+					// a intermediate result of 0 is useless
+					if (!(top_op->op == OpVal &&
+					      (ctx->ops[ctx->ops_index - 2].op == OpAdd || ctx->ops[ctx->ops_index - 2].op == OpSub) &&
+					      ctx->ops[ctx->ops_index - 3].op == OpVal &&
+					      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+						// chains of subdivisions/additions need to be in descending order
+						value = ctx->vals[ctx->vals_index - 1] = lhs - rhs;
+						push_op(ctx, OpSub, value);
+						test_solution(ctx);
+						solve_ops(ctx);
+						solve_vals(ctx);
+						pop_op(ctx);
+					}
 				}
 			}
 
-			// TODO: only emit (X * 2) * 3 and not (X * 3) * 2
-			// TODO: only emit (X * Y) / Z and not (X / Z) * Y
-			//if (ctx->ops_index < 1 || (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs))) {
-			if (ctx->ops_index < 1 || (lhs_op->op != OpDiv && lhs_op->op != OpMul)) {
-				// X * 1 is useless
-				if (rhs != 1) {
-					value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
-					push_op(ctx, OpMul, value);
-					test_solution(ctx);
-					solve_ops(ctx);
-					solve_vals(ctx);
-					pop_op(ctx);
-				}
+			if (rhs != 1) {
+				// X * 1 and X / 1 are useless
 
-				// TODO: only emit (X / 2) / 3 and not (X / 3) / 21
-				// X / 1 is useless
-				if (rhs != 1 && lhs % rhs == 0) {
-					value = ctx->vals[ctx->vals_index - 1] = lhs / rhs;
-					push_op(ctx, OpDiv, value);
-					test_solution(ctx);
-					solve_ops(ctx);
-					solve_vals(ctx);
-					pop_op(ctx);
+				//   discard  ==    use
+				// X Y Z * *  ==  X Y * Z *
+				// X Y Z / *  ==  Y Z / X *
+				// X Y Z * /  ==  X Y / Z /
+				// X Y Z / /  ==  X Y / Z *
+				if (top_op->op != OpMul && top_op->op != OpDiv) {
+					if (!(top_op->op == OpVal &&
+					      ctx->ops[ctx->ops_index - 2].op == OpMul &&
+					      ctx->ops[ctx->ops_index - 3].op == OpVal &&
+					      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+						// chains of multiplications need to be in descending order
+						value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
+						push_op(ctx, OpMul, value);
+						test_solution(ctx);
+						solve_ops(ctx);
+						solve_vals(ctx);
+						pop_op(ctx);
+					}
+
+					if (lhs % rhs == 0) {
+						// only whole numbers as intermediate results allowed
+						if (!(top_op->op == OpVal &&
+						      (ctx->ops[ctx->ops_index - 2].op == OpMul || ctx->ops[ctx->ops_index - 2].op == OpDiv) &&
+						      ctx->ops[ctx->ops_index - 3].op == OpVal &&
+						      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+							// chains of multiplications/divisions need to be in descending order
+							value = ctx->vals[ctx->vals_index - 1] = lhs / rhs;
+							push_op(ctx, OpDiv, value);
+							test_solution(ctx);
+							solve_ops(ctx);
+							solve_vals(ctx);
+							pop_op(ctx);
+						}
+					}
 				}
 			}
 		}
