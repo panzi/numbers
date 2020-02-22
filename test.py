@@ -3,7 +3,7 @@
 import sys
 from subprocess import Popen, PIPE
 from os.path import abspath, join as joinpath, dirname
-from random import randint, choice, shuffle
+from random import randint, choice
 from time import monotonic
 
 UINT64_MAX = 0xffff_ffff_ffff_ffff
