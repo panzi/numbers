@@ -210,20 +210,18 @@ static void solve_ops(NumbersCtx *ctx) {
 		-- ctx->vals_index;
 		if (lhs >= rhs) {
 			const Element *lhs_op = &ctx->ops[ctx->ops_index - 1];
-			const Element *lhs_rhs_op = &ctx->ops[ctx->ops_index - 2];
-			// only emit (X + 1) + 2 and not (X + 2) + 1
-			// only emit (X + Y) - Z and not (X - Z) + Y
-			if (ctx->ops_index < 1 || (lhs_op->op != OpSub && (lhs_op->op != OpAdd || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs))) {
+			// const Element *lhs_rhs_op = &ctx->ops[ctx->ops_index - 2];
+			// TODO: only emit (X + 1) + 2 and not (X + 2) + 1
+			// TODO: only emit (X + Y) - Z and not (X - Z) + Y
+			if (ctx->ops_index < 1 || (lhs_op->op != OpSub && lhs_op->op != OpAdd)) {
 				value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
 				push_op(ctx, OpAdd, value);
 				test_solution(ctx);
 				solve_ops(ctx);
 				solve_vals(ctx);
 				pop_op(ctx);
-			}
 
-			// only emit (X - 1) - 2 and not (X - 2) - 1
-			if (ctx->ops_index < 1 || (lhs_op->op != OpSub || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs)) {
+				// TODO: only emit (X - 1) - 2 and not (X - 2) - 1
 				if (lhs != rhs) {
 					value = ctx->vals[ctx->vals_index - 1] = lhs - rhs;
 					push_op(ctx, OpSub, value);
@@ -234,9 +232,10 @@ static void solve_ops(NumbersCtx *ctx) {
 				}
 			}
 
-			// only emit (X * 2) * 3 and not (X * 3) * 2
-			// only emit (X * Y) / Z and not (X / Z) * Y
-			if (ctx->ops_index < 1 || (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs))) {
+			// TODO: only emit (X * 2) * 3 and not (X * 3) * 2
+			// TODO: only emit (X * Y) / Z and not (X / Z) * Y
+			//if (ctx->ops_index < 1 || (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs))) {
+			if (ctx->ops_index < 1 || (lhs_op->op != OpDiv && lhs_op->op != OpMul)) {
 				// X * 1 is useless
 				if (rhs != 1) {
 					value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
@@ -246,10 +245,8 @@ static void solve_ops(NumbersCtx *ctx) {
 					solve_vals(ctx);
 					pop_op(ctx);
 				}
-			}
 
-			// only emit (X / 2) / 3 and not (X / 3) / 21
-			if (ctx->ops_index < 1 || (lhs_op->op != OpDiv || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs)) {
+				// TODO: only emit (X / 2) / 3 and not (X / 3) / 21
 				// X / 1 is useless
 				if (rhs != 1 && lhs % rhs == 0) {
 					value = ctx->vals[ctx->vals_index - 1] = lhs / rhs;
