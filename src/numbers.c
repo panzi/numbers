@@ -211,7 +211,7 @@ static void solve_ops(NumbersCtx *ctx) {
 		-- ctx->vals_index;
 
 		if (lhs >= rhs) {
-			// intermediate reuslts need to be in descending order
+			// intermediate results need to be in descending order
 			const Element *top_op = &ctx->ops[ctx->ops_index - 1];
 			//   discard  ==    use
 			// X Y Z + +  ==  X Y + Z +
@@ -220,10 +220,10 @@ static void solve_ops(NumbersCtx *ctx) {
 			// X Y Z - -  ==  X Y - Z +  EXCEPT FOR WHEN X - Y WOULD BE NEGATIVE!!
 			//                           Negative intermediate results are forbidden.
 			if (top_op->op != OpAdd) {
+				// TODO: find a way to do this for when top_op->op != OpVal
 				if (top_op->op != OpSub && !(top_op->op == OpVal &&
 				      ((ctx->ops[ctx->ops_index - 2].op == OpAdd &&
-				        ctx->ops[ctx->ops_index - 3].op == OpVal &&
-				        ctx->ops[ctx->ops_index - 3].value < top_op->value) ||
+				        ctx->ops[ctx->ops_index - 3].value < rhs) ||
 				       (ctx->ops[ctx->ops_index - 2].op == OpSub)))) {
 					// chains of additions need to be in descending order
 					value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
@@ -234,16 +234,16 @@ static void solve_ops(NumbersCtx *ctx) {
 					pop_op(ctx);
 				}
 
-				// V = top_op->value
+				// V = top_op->value = rhs
 				// Z = ctx->ops[ctx->ops_index - 2].value
 				// Y - Z = V
 				// Y = V + Z
-				if ((top_op->op != OpSub || lhs < (top_op->value + ctx->ops[ctx->ops_index - 2].value)) && lhs != rhs) {
+				if ((top_op->op != OpSub || lhs < (rhs + ctx->ops[ctx->ops_index - 2].value)) &&
+				    lhs != rhs) {
 					// a intermediate result of 0 is useless
 					if (!(top_op->op == OpVal &&
 					      ctx->ops[ctx->ops_index - 2].op == OpSub &&
-					      ctx->ops[ctx->ops_index - 3].op == OpVal &&
-					      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+					      ctx->ops[ctx->ops_index - 3].value < rhs)) {
 						// chains of subdivisions/additions need to be in descending order
 						value = lhs - rhs;
 						if (value != rhs) {
@@ -270,8 +270,7 @@ static void solve_ops(NumbersCtx *ctx) {
 				if (top_op->op != OpMul && top_op->op != OpDiv) {
 					if (!(top_op->op == OpVal &&
 					      ((ctx->ops[ctx->ops_index - 2].op == OpMul &&
-					        ctx->ops[ctx->ops_index - 3].op == OpVal &&
-					        ctx->ops[ctx->ops_index - 3].value < top_op->value) ||
+					        ctx->ops[ctx->ops_index - 3].value < rhs) ||
 					       (ctx->ops[ctx->ops_index - 2].op == OpDiv)))) {
 						// chains of multiplications need to be in descending order
 						value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
@@ -286,8 +285,7 @@ static void solve_ops(NumbersCtx *ctx) {
 						// only whole numbers as intermediate results allowed
 						if (!(top_op->op == OpVal &&
 						      ctx->ops[ctx->ops_index - 2].op == OpDiv &&
-						      ctx->ops[ctx->ops_index - 3].op == OpVal &&
-						      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+						      ctx->ops[ctx->ops_index - 3].value < rhs)) {
 							// chains of multiplications/divisions need to be in descending order
 							value = lhs / rhs;
 							if (value != rhs) {
