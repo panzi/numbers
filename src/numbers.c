@@ -231,8 +231,11 @@ static void solve_ops(NumbersCtx *ctx) {
 					pop_op(ctx);
 				}
 
-				// TODO: if ((top_op->op != OpSub || lhs < (lhs of rhs)) && lhs != rhs) {
-				if (lhs != rhs) {
+				// V = top_op->value
+				// Z = ctx->ops[ctx->ops_index - 2].value
+				// Y - Z = V
+				// Y = V + Z
+				if ((top_op->op != OpSub || lhs < (top_op->value + ctx->ops[ctx->ops_index - 2].value)) && lhs != rhs) {
 					// a intermediate result of 0 is useless
 					if (!(top_op->op == OpVal &&
 					      (ctx->ops[ctx->ops_index - 2].op == OpAdd || ctx->ops[ctx->ops_index - 2].op == OpSub) &&
