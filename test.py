@@ -4,8 +4,10 @@ import sys
 from subprocess import Popen, PIPE
 from os.path import abspath, join as joinpath, dirname
 from random import randint, choice, shuffle
+from time import monotonic
 
 UINT64_MAX = 0xffff_ffff_ffff_ffff
+TIMEOUT    = 1
 
 def generate_game(min_size:int=1, max_size:int=7, max_number:int=UINT64_MAX, max_target:int=UINT64_MAX):
 	if min_size < 1:
@@ -37,6 +39,9 @@ def generate_game(min_size:int=1, max_size:int=7, max_number:int=UINT64_MAX, max
 		)
 
 	def generate_vals():
+		if monotonic() - start_ts > TIMEOUT:
+			raise TimeoutError
+
 		while len(numbers) < size:
 			if max_number <= 10 or randint(0, 1) == 0:
 				number = randint(1, 10)
@@ -58,6 +63,9 @@ def generate_game(min_size:int=1, max_size:int=7, max_number:int=UINT64_MAX, max
 			numbers.pop()
 
 	def generate_ops():
+		if monotonic() - start_ts > TIMEOUT:
+			raise TimeoutError
+
 		if len(vals) >= 2:
 			lhs = vals[-2]
 			rhs = vals.pop()
@@ -103,7 +111,17 @@ def generate_game(min_size:int=1, max_size:int=7, max_number:int=UINT64_MAX, max
 			vals.append(rhs)
 			vals[-2] = lhs
 
-	generate_vals()
+	for _ in range(64):
+		try:
+			numbers.clear()
+			vals.clear()
+			code.clear()
+			start_ts = monotonic()
+			generate_vals()
+		except TimeoutError:
+			pass
+		else:
+			break
 
 	if not finished():
 		raise RuntimeError(f'failed to generate game for parameters min_size={min_size}, max_size={max_size} (selected size={size}), max_number={max_number} max_target={max_target}')
@@ -143,7 +161,7 @@ def test():
 	fail_count = 0
 	success_count = 0
 	failed_games = []
-	for testnr in range(1, 257):
+	for testnr in range(1, 1001):
 		game = generate_game(max_number=500, max_target=999)
 		target = game['target']
 		numbers = game['numbers']
