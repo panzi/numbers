@@ -220,9 +220,10 @@ static void solve_ops(NumbersCtx *ctx) {
 			//                           Negative intermediate results are forbidden.
 			if (top_op->op != OpAdd) {
 				if (top_op->op != OpSub && !(top_op->op == OpVal &&
-				      ctx->ops[ctx->ops_index - 2].op == OpAdd &&
-				      ctx->ops[ctx->ops_index - 3].op == OpVal &&
-				      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+				      ((ctx->ops[ctx->ops_index - 2].op == OpAdd &&
+				        ctx->ops[ctx->ops_index - 3].op == OpVal &&
+				        ctx->ops[ctx->ops_index - 3].value < top_op->value) ||
+				       (ctx->ops[ctx->ops_index - 2].op == OpSub)))) {
 					// chains of additions need to be in descending order
 					value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
 					push_op(ctx, OpAdd, value);
@@ -239,7 +240,7 @@ static void solve_ops(NumbersCtx *ctx) {
 				if ((top_op->op != OpSub || lhs < (top_op->value + ctx->ops[ctx->ops_index - 2].value)) && lhs != rhs) {
 					// a intermediate result of 0 is useless
 					if (!(top_op->op == OpVal &&
-					      (ctx->ops[ctx->ops_index - 2].op == OpAdd || ctx->ops[ctx->ops_index - 2].op == OpSub) &&
+					      ctx->ops[ctx->ops_index - 2].op == OpSub &&
 					      ctx->ops[ctx->ops_index - 3].op == OpVal &&
 					      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
 						// chains of subdivisions/additions need to be in descending order
@@ -263,9 +264,10 @@ static void solve_ops(NumbersCtx *ctx) {
 				// X Y Z / /  ==  X Y / Z *
 				if (top_op->op != OpMul && top_op->op != OpDiv) {
 					if (!(top_op->op == OpVal &&
-					      ctx->ops[ctx->ops_index - 2].op == OpMul &&
-					      ctx->ops[ctx->ops_index - 3].op == OpVal &&
-					      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
+					      ((ctx->ops[ctx->ops_index - 2].op == OpMul &&
+					        ctx->ops[ctx->ops_index - 3].op == OpVal &&
+					        ctx->ops[ctx->ops_index - 3].value < top_op->value) ||
+					       (ctx->ops[ctx->ops_index - 2].op == OpDiv)))) {
 						// chains of multiplications need to be in descending order
 						value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
 						push_op(ctx, OpMul, value);
@@ -278,7 +280,7 @@ static void solve_ops(NumbersCtx *ctx) {
 					if (lhs % rhs == 0) {
 						// only whole numbers as intermediate results allowed
 						if (!(top_op->op == OpVal &&
-						      (ctx->ops[ctx->ops_index - 2].op == OpMul || ctx->ops[ctx->ops_index - 2].op == OpDiv) &&
+						      ctx->ops[ctx->ops_index - 2].op == OpDiv &&
 						      ctx->ops[ctx->ops_index - 3].op == OpVal &&
 						      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
 							// chains of multiplications/divisions need to be in descending order
