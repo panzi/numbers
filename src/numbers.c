@@ -209,6 +209,7 @@ static void solve_ops(NumbersCtx *ctx) {
 		Number value = 0;
 
 		-- ctx->vals_index;
+
 		if (lhs >= rhs) {
 			// intermediate reuslts need to be in descending order
 			const Element *top_op = &ctx->ops[ctx->ops_index - 1];
@@ -244,12 +245,16 @@ static void solve_ops(NumbersCtx *ctx) {
 					      ctx->ops[ctx->ops_index - 3].op == OpVal &&
 					      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
 						// chains of subdivisions/additions need to be in descending order
-						value = ctx->vals[ctx->vals_index - 1] = lhs - rhs;
-						push_op(ctx, OpSub, value);
-						test_solution(ctx);
-						solve_ops(ctx);
-						solve_vals(ctx);
-						pop_op(ctx);
+						value = lhs - rhs;
+						if (value != rhs) {
+							// X - Y = Y is just a roundabout way to write Y
+							ctx->vals[ctx->vals_index - 1] = value;
+							push_op(ctx, OpSub, value);
+							test_solution(ctx);
+							solve_ops(ctx);
+							solve_vals(ctx);
+							pop_op(ctx);
+						}
 					}
 				}
 			}
@@ -284,17 +289,22 @@ static void solve_ops(NumbersCtx *ctx) {
 						      ctx->ops[ctx->ops_index - 3].op == OpVal &&
 						      ctx->ops[ctx->ops_index - 3].value < top_op->value)) {
 							// chains of multiplications/divisions need to be in descending order
-							value = ctx->vals[ctx->vals_index - 1] = lhs / rhs;
-							push_op(ctx, OpDiv, value);
-							test_solution(ctx);
-							solve_ops(ctx);
-							solve_vals(ctx);
-							pop_op(ctx);
+							value = lhs / rhs;
+							if (value != rhs) {
+								// X / Y = Y is just a roundabout way to write Y
+								ctx->vals[ctx->vals_index - 1] = value;
+								push_op(ctx, OpDiv, value);
+								test_solution(ctx);
+								solve_ops(ctx);
+								solve_vals(ctx);
+								pop_op(ctx);
+							}
 						}
 					}
 				}
 			}
 		}
+
 		++ ctx->vals_index;
 		ctx->vals[ctx->vals_index - 1] = rhs;
 		ctx->vals[ctx->vals_index - 2] = lhs;
