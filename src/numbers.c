@@ -51,8 +51,9 @@ typedef struct ElementS {
 typedef struct NumbersCtxS {
 	Number           target;
 	const Number    *numbers;
-	bool            *used;
 	size_t           count;
+	bool            *used;
+	size_t           used_count;
 	Element         *ops;
 	size_t           ops_size;
 	size_t           ops_index;
@@ -299,22 +300,26 @@ static void solve_ops(NumbersCtx *ctx) {
 }
 
 static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_index) {
-	for (size_t index = start_index; index < end_index; ++ index) {
-		if (!ctx->used[index]) {
-			ctx->used[index] = true;
-			const Number number = ctx->numbers[index];
-			push_op(ctx, OpVal, number);
-			assert(ctx->vals_index < ctx->vals_size);
-			ctx->vals[ctx->vals_index] = number;
-			++ ctx->vals_index;
+	if (ctx->used_count < ctx->count) {
+		for (size_t index = start_index; index < end_index; ++ index) {
+			if (!ctx->used[index]) {
+				ctx->used[index] = true;
+				++ ctx->used_count;
+				const Number number = ctx->numbers[index];
+				push_op(ctx, OpVal, number);
+				assert(ctx->vals_index < ctx->vals_size);
+				ctx->vals[ctx->vals_index] = number;
+				++ ctx->vals_index;
 
-			test_solution(ctx);
-			solve_ops(ctx);
-			solve_vals(ctx);
+				test_solution(ctx);
+				solve_ops(ctx);
+				solve_vals(ctx);
 
-			-- ctx->vals_index;
-			pop_op(ctx);
-			ctx->used[index] = false;
+				-- ctx->vals_index;
+				pop_op(ctx);
+				ctx->used[index] = false;
+				-- ctx->used_count;
+			}
 		}
 	}
 }
@@ -389,6 +394,7 @@ void solve(const Number target, const Number numbers[], const size_t count, size
 			.target      = target,
 			.numbers     = numbers,
 			.used        = used,
+			.used_count  = 0,
 			.count       = count,
 			.ops         = ops,
 			.ops_size    = ops_size,
