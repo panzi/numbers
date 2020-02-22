@@ -63,19 +63,6 @@ typedef struct NumbersCtxS {
 	pthread_mutex_t *iolock;
 } NumbersCtx;
 
-static void push_op(NumbersCtx *ctx, Op op, Number value) {
-	assert(ctx->ops_index < ctx->ops_size);
-
-	ctx->ops[ctx->ops_index].op    = op;
-	ctx->ops[ctx->ops_index].value = value;
-	++ ctx->ops_index;
-}
-
-static void pop_op(NumbersCtx *ctx) {
-	assert(ctx->ops_index > 0);
-	-- ctx->ops_index;
-}
-
 static void print_solution_rpn(const NumbersCtx *ctx) {
 	for (size_t index = 0; index < ctx->ops_index; ++ index) {
 		if (index > 0) {
@@ -91,6 +78,19 @@ static void print_solution_rpn(const NumbersCtx *ctx) {
 		}
 	}
 	putchar('\n');
+}
+
+static void push_op(NumbersCtx *ctx, Op op, Number value) {
+	assert(ctx->ops_index < ctx->ops_size);
+
+	ctx->ops[ctx->ops_index].op    = op;
+	ctx->ops[ctx->ops_index].value = value;
+	++ ctx->ops_index;
+}
+
+static void pop_op(NumbersCtx *ctx) {
+	assert(ctx->ops_index > 0);
+	-- ctx->ops_index;
 }
 
 static size_t get_expr_end(const NumbersCtx *ctx, size_t index) {
@@ -169,9 +169,7 @@ static void print_solution_expr(const NumbersCtx *ctx) {
 	putchar('\n');
 }
 
-static inline void solve_next(NumbersCtx *ctx);
-
-static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_index) {
+static void test_solution(NumbersCtx *ctx) {
 	if (ctx->vals_index == 1 && ctx->target == ctx->vals[0]) {
 		int errnum = 0;
 		if (ctx->iolock) {
@@ -195,7 +193,81 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 			}
 		}
 	}
+}
 
+static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_index);
+
+static inline void solve_vals(NumbersCtx *ctx) {
+	solve_vals_range(ctx, 0, ctx->count);
+}
+
+static void solve_ops(NumbersCtx *ctx) {
+	if (ctx->vals_index > 1) {
+		const Number rhs = ctx->vals[ctx->vals_index - 1];
+		const Number lhs = ctx->vals[ctx->vals_index - 2];
+		Number value = 0;
+
+		-- ctx->vals_index;
+		if (lhs >= rhs) {
+			const Element *lhs_op = &ctx->ops[ctx->ops_index - 1];
+			const Element *lhs_rhs_op = &ctx->ops[ctx->ops_index - 2];
+			// only emit (X + 1) + 2 and not (X + 2) + 1
+			// only emit (X + Y) - Z and not (X - Z) + Y
+			if (ctx->ops_index < 1 || (lhs_op->op != OpSub && (lhs_op->op != OpAdd || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs))) {
+				value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
+				push_op(ctx, OpAdd, value);
+				test_solution(ctx);
+				solve_ops(ctx);
+				solve_vals(ctx);
+				pop_op(ctx);
+			}
+
+			// only emit (X - 1) - 2 and not (X - 2) - 1
+			if (ctx->ops_index < 1 || (lhs_op->op != OpSub || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs)) {
+				if (lhs != rhs) {
+					value = ctx->vals[ctx->vals_index - 1] = lhs - rhs;
+					push_op(ctx, OpSub, value);
+					test_solution(ctx);
+					solve_ops(ctx);
+					solve_vals(ctx);
+					pop_op(ctx);
+				}
+			}
+
+			// only emit (X * 2) * 3 and not (X * 3) * 2
+			// only emit (X * Y) / Z and not (X / Z) * Y
+			if (ctx->ops_index < 1 || (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs))) {
+				// X * 1 is useless
+				if (rhs != 1) {
+					value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
+					push_op(ctx, OpMul, value);
+					test_solution(ctx);
+					solve_ops(ctx);
+					solve_vals(ctx);
+					pop_op(ctx);
+				}
+			}
+
+			// only emit (X / 2) / 3 and not (X / 3) / 21
+			if (ctx->ops_index < 1 || (lhs_op->op != OpDiv || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= rhs)) {
+				// X / 1 is useless
+				if (rhs != 1 && lhs % rhs == 0) {
+					value = ctx->vals[ctx->vals_index - 1] = lhs / rhs;
+					push_op(ctx, OpDiv, value);
+					test_solution(ctx);
+					solve_ops(ctx);
+					solve_vals(ctx);
+					pop_op(ctx);
+				}
+			}
+		}
+		++ ctx->vals_index;
+		ctx->vals[ctx->vals_index - 1] = rhs;
+		ctx->vals[ctx->vals_index - 2] = lhs;
+	}
+}
+
+static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_index) {
 	for (size_t index = start_index; index < end_index; ++ index) {
 		if (!ctx->used[index]) {
 			ctx->used[index] = true;
@@ -205,70 +277,15 @@ static void solve_next_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 			ctx->vals[ctx->vals_index] = number;
 			++ ctx->vals_index;
 
-			if (ctx->vals_index > 1) {
-				const Number lhs = ctx->vals[ctx->vals_index - 2];
-				Number value = 0;
-
-				-- ctx->vals_index;
-				if (number <= lhs) {
-					const Element *lhs_op = &ctx->ops[ctx->ops_index - 2];
-					const Element *lhs_rhs_op = &ctx->ops[ctx->ops_index - 3];
-					// only emit (X + 1) + 2 and not (X + 2) + 1
-					// only emit (X + Y) - Z and not (X - Z) + Y
-					if (ctx->ops_index < 2 || (lhs_op->op != OpSub && (lhs_op->op != OpAdd || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number))) {
-						value = ctx->vals[ctx->vals_index - 1] = lhs + number;
-						push_op(ctx, OpAdd, value);
-						solve_next(ctx);
-						pop_op(ctx);
-					}
-
-					// only emit (X - 1) - 2 and not (X - 2) - 1
-					if (ctx->ops_index < 2 || (lhs_op->op != OpSub || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number)) {
-						if (lhs != number) {
-							value = ctx->vals[ctx->vals_index - 1] = lhs - number;
-							push_op(ctx, OpSub, value);
-							solve_next(ctx);
-							pop_op(ctx);
-						}
-					}
-
-					// only emit (X * 2) * 3 and not (X * 3) * 2
-					// only emit (X * Y) / Z and not (X / Z) * Y
-					if (ctx->ops_index < 2 || (lhs_op->op != OpDiv && (lhs_op->op != OpMul || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number))) {
-						// X * 1 is useless
-						if (number != 1) {
-							value = ctx->vals[ctx->vals_index - 1] = lhs * number;
-							push_op(ctx, OpMul, value);
-							solve_next(ctx);
-							pop_op(ctx);
-						}
-					}
-
-					// only emit (X / 2) / 3 and not (X / 3) / 21
-					if (ctx->ops_index < 2 || (lhs_op->op != OpDiv || lhs_rhs_op->op != OpVal || lhs_rhs_op->value <= number)) {
-						// X / 1 is useless
-						if (number != 1 && lhs % number == 0) {
-							value = ctx->vals[ctx->vals_index - 1] = lhs / number;
-							push_op(ctx, OpDiv, value);
-							solve_next(ctx);
-							pop_op(ctx);
-						}
-					}
-				}
-				++ ctx->vals_index;
-				ctx->vals[ctx->vals_index - 2] = lhs;
-			}
-			solve_next(ctx);
+			test_solution(ctx);
+			solve_ops(ctx);
+			solve_vals(ctx);
 
 			-- ctx->vals_index;
 			pop_op(ctx);
 			ctx->used[index] = false;
 		}
 	}
-}
-
-void solve_next(NumbersCtx *ctx) {
-	solve_next_range(ctx, 0, ctx->count);
 }
 
 typedef struct ThreadCtxS {
@@ -280,7 +297,7 @@ typedef struct ThreadCtxS {
 
 static void* worker_proc(void *ptr) {
 	ThreadCtx *worker = (ThreadCtx*)ptr;
-	solve_next_range(&worker->ctx, worker->start_index, worker->end_index);
+	solve_vals_range(&worker->ctx, worker->start_index, worker->end_index);
 	return NULL;
 }
 
