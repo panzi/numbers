@@ -29,7 +29,7 @@ static size_t get_cpu_count() {
 
 typedef uint64_t Number;
 typedef uint16_t Index;
-#define MAX_NUMBERS 64
+#define MAX_NUMBERS (sizeof(size_t) * 8)
 
 typedef enum OpE {
 	OpVal = '0',
@@ -571,7 +571,7 @@ int main(int argc, char *argv[]) {
 	const size_t count = argc - optind;
 
 	if (count > MAX_NUMBERS) {
-		panicf("too many numbers: %zu > %u", count, MAX_NUMBERS);
+		panicf("too many numbers: %zu > %zu", count, MAX_NUMBERS);
 	}
 
 	if (threads == 0) {
