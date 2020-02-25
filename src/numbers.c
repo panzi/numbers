@@ -86,7 +86,7 @@ static void print_solution_rpn(const NumbersCtx *ctx) {
 	putchar('\n');
 }
 
-static void push_op(NumbersCtx *ctx, Op op, Number value) {
+static inline void push_op(NumbersCtx *ctx, Op op, Number value) {
 	assert(ctx->ops_index < ctx->ops_size);
 
 	ctx->ops[ctx->ops_index] = (Element){
@@ -96,7 +96,7 @@ static void push_op(NumbersCtx *ctx, Op op, Number value) {
 	++ ctx->ops_index;
 }
 
-static void pop_op(NumbersCtx *ctx) {
+static inline void pop_op(NumbersCtx *ctx) {
 	assert(ctx->ops_index > 0);
 	-- ctx->ops_index;
 }
