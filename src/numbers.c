@@ -9,11 +9,11 @@
 #include "panic.h"
 
 #if defined(_WIN16) || defined(_WIN32) || defined(_WIN64)
-#define __WINDOWS__
+#	define __WINDOWS__
 #endif
 
 #if !defined(__WINDOWS__)
-#include <unistd.h>
+#	include <unistd.h>
 #endif
 
 #ifdef _SC_NPROCESSORS_ONLN
@@ -29,7 +29,7 @@ static size_t get_cpu_count() {
 
 typedef uint64_t Number;
 typedef uint16_t Index;
-#define MAX_NUMBERS ((UINT16_MAX - 1) / 2)
+#define MAX_NUMBERS 64
 
 typedef enum OpE {
 	OpVal = '0',
@@ -59,7 +59,7 @@ typedef struct NumbersCtxS {
 	Number           target;
 	const Number    *numbers;
 	Index            count;
-	bool            *used;
+	size_t           used;
 	Index            used_count;
 	Element         *ops;
 	Index            ops_size;
@@ -331,9 +331,11 @@ static void solve_ops(NumbersCtx *ctx) {
 
 static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index) {
 	if (ctx->used_count < ctx->count) {
+		const size_t used = ctx->used;
+		size_t mask = 1 << start_index;
 		for (Index index = start_index; index < end_index; ++ index) {
-			if (!ctx->used[index]) {
-				ctx->used[index] = true;
+			if ((used & mask) == 0) {
+				ctx->used = used | mask;
 				++ ctx->used_count;
 				const Number number = ctx->numbers[index];
 				assert(ctx->vals_index < ctx->vals_size);
@@ -350,9 +352,10 @@ static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index
 
 				-- ctx->vals_index;
 				pop_op(ctx);
-				ctx->used[index] = false;
+				ctx->used = used;
 				-- ctx->used_count;
 			}
+			mask <<= 1;
 		}
 	}
 }
@@ -410,11 +413,6 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 			panice("allocating value stack of size %u", vals_size);
 		}
 
-		bool *used = calloc(count, sizeof(bool));
-		if (!used) {
-			panice("allocating used array of size %u", count);
-		}
-
 		ThreadCtx *worker = &workers[thread_index];
 		worker->start_index = index;
 		index += stride;
@@ -426,7 +424,7 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 		worker->ctx = (NumbersCtx){
 			.target      = target,
 			.numbers     = numbers,
-			.used        = used,
+			.used        = 0,
 			.used_count  = 0,
 			.count       = count,
 			.ops         = ops,
@@ -454,7 +452,6 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 
 		free(worker->ctx.ops);
 		free(worker->ctx.vals);
-		free(worker->ctx.used);
 	}
 
 	free(workers);
