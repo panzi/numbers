@@ -28,6 +28,8 @@ static size_t get_cpu_count() {
 #endif
 
 typedef uint64_t Number;
+typedef uint16_t Index;
+#define MAX_NUMBERS ((UINT16_MAX - 1) / 2)
 
 typedef enum OpE {
 	OpVal = '0',
@@ -56,21 +58,21 @@ typedef struct ValElementS {
 typedef struct NumbersCtxS {
 	Number           target;
 	const Number    *numbers;
-	size_t           count;
+	Index            count;
 	bool            *used;
-	size_t           used_count;
+	Index            used_count;
 	Element         *ops;
-	size_t           ops_size;
-	size_t           ops_index;
+	Index            ops_size;
+	Index            ops_index;
 	ValElement      *vals;
-	size_t           vals_size;
-	size_t           vals_index;
+	Index            vals_size;
+	Index            vals_index;
 	PrintStyle       print_style;
 	pthread_mutex_t *iolock;
 } NumbersCtx;
 
 static void print_solution_rpn(const NumbersCtx *ctx) {
-	for (size_t index = 0; index < ctx->ops_index; ++ index) {
+	for (Index index = 0; index < ctx->ops_index; ++ index) {
 		if (index > 0) {
 			putchar(' ');
 		}
@@ -101,7 +103,7 @@ static inline void pop_op(NumbersCtx *ctx) {
 	-- ctx->ops_index;
 }
 
-static size_t get_expr_end(const NumbersCtx *ctx, size_t index) {
+static Index get_expr_end(const NumbersCtx *ctx, Index index) {
 	const Op op = ctx->ops[index].op;
 	if (op == OpVal) {
 		return index;
@@ -126,14 +128,14 @@ static int get_precedence(Op op) {
 	}
 }
 
-static void print_expr(const NumbersCtx *ctx, size_t index) {
+static void print_expr(const NumbersCtx *ctx, Index index) {
 	const Op op = ctx->ops[index].op;
 
 	if (op == OpVal) {
 		printf("%lu", ctx->ops[index].value);
 	} else {
 		assert(index > 0);
-		const size_t lhs_index = get_expr_end(ctx, index - 1);
+		const Index lhs_index = get_expr_end(ctx, index - 1);
 		assert(lhs_index > 0);
 		const int this_precedence = get_precedence(ctx->ops[index].op);
 		const int lhs_precedence  = get_precedence(ctx->ops[lhs_index - 1].op);
@@ -171,7 +173,7 @@ static void print_expr(const NumbersCtx *ctx, size_t index) {
 }
 
 static void print_solution_expr(const NumbersCtx *ctx) {
-	size_t index = ctx->ops_index;
+	Index index = ctx->ops_index;
 	assert(index > 0);
 	print_expr(ctx, index - 1);
 	putchar('\n');
@@ -203,7 +205,7 @@ static void test_solution(NumbersCtx *ctx) {
 	}
 }
 
-static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_index);
+static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index);
 
 static inline void solve_vals(NumbersCtx *ctx) {
 	solve_vals_range(ctx, 0, ctx->count);
@@ -217,8 +219,8 @@ static void solve_ops(NumbersCtx *ctx) {
 		const Number rhs = rhs_val->value;
 
 		if (lhs >= rhs) {
-			const size_t lhs_ops_index = lhs_val->ops_index;
-			const size_t rhs_ops_index = rhs_val->ops_index;
+			const Index lhs_ops_index = lhs_val->ops_index;
+			const Index rhs_ops_index = rhs_val->ops_index;
 			const Element *lhs_op = &ctx->ops[lhs_ops_index];
 			const Element *rhs_op = &ctx->ops[rhs_ops_index];
 			Number value = 0;
@@ -327,9 +329,9 @@ static void solve_ops(NumbersCtx *ctx) {
 	}
 }
 
-static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_index) {
+static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index) {
 	if (ctx->used_count < ctx->count) {
-		for (size_t index = start_index; index < end_index; ++ index) {
+		for (Index index = start_index; index < end_index; ++ index) {
 			if (!ctx->used[index]) {
 				ctx->used[index] = true;
 				++ ctx->used_count;
@@ -357,8 +359,8 @@ static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 
 typedef struct ThreadCtxS {
 	NumbersCtx ctx;
-	size_t start_index;
-	size_t end_index;
+	Index start_index;
+	Index end_index;
 	pthread_t thread;
 } ThreadCtx;
 
@@ -368,7 +370,7 @@ static void* worker_proc(void *ptr) {
 	return NULL;
 }
 
-void solve(const Number target, const Number numbers[], const size_t count, size_t threads, PrintStyle print_style) {
+void solve(const Number target, const Number numbers[], const Index count, size_t threads, PrintStyle print_style) {
 	if (count == 0) {
 		panicf("need at least one number");
 	}
@@ -381,8 +383,8 @@ void solve(const Number target, const Number numbers[], const size_t count, size
 		threads = count;
 	}
 
-	const size_t ops_size = count + count - 1;
-	const size_t vals_size = count;
+	const Index ops_size = count + count - 1;
+	const Index vals_size = count;
 
 	ThreadCtx *workers = calloc(threads, sizeof(ThreadCtx));
 	if (!workers) {
@@ -400,17 +402,17 @@ void solve(const Number target, const Number numbers[], const size_t count, size
 	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
 		Element *ops = calloc(ops_size, sizeof(Element));
 		if (!ops) {
-			panice("allocating operand stack of size %zu", ops_size);
+			panice("allocating operand stack of size %u", ops_size);
 		}
 
 		ValElement *vals = calloc(vals_size, sizeof(ValElement));
 		if (!vals) {
-			panice("allocating value stack of size %zu", vals_size);
+			panice("allocating value stack of size %u", vals_size);
 		}
 
 		bool *used = calloc(count, sizeof(bool));
 		if (!used) {
-			panice("allocating used array of size %zu", count);
+			panice("allocating used array of size %u", count);
 		}
 
 		ThreadCtx *worker = &workers[thread_index];
@@ -550,6 +552,10 @@ int main(int argc, char *argv[]) {
 	++ optind;
 
 	const size_t count = argc - optind;
+
+	if (count > MAX_NUMBERS) {
+		panicf("too many numbers: %zu > %u", count, MAX_NUMBERS);
+	}
 
 #ifndef HAS_GET_CPU_COUNT
 	if (threads == 0) {
