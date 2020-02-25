@@ -470,10 +470,17 @@ static void usage(int argc, char *const argv[]) {
 		"\n"
 		"\t-h, --help             Print this help message.\n"
 #ifdef HAS_GET_CPU_COUNT
-		"\t-t, --threads=COUNT    Spawn COUNT threads. Uses number of CPUs per default.\n"
+		"\t-t, --threads=COUNT    Spawn COUNT threads. (default: cpus)\n"
 #else
-		"\t-t, --threads=COUNT    Spawn COUNT threads. (default is number count)\n"
+		"\t-t, --threads=COUNT    Spawn COUNT threads. (default: numbers)\n"
 #endif
+		"\n"
+		"\t                       Special COUNT values:\n"
+#ifdef HAS_GET_CPU_COUNT
+		"\t                          cpus ...... use number of CPUs (CPU cores)\n"
+#endif
+		"\t                          numbers ... use number count\n"
+		"\n"
 		"\t-r, --rpn              Print solutions in reverse Polish notation.\n"
 		"\t-e, --expr             Print solutions in usual notation (default).\n"
 		"\t-p, --paren            Like --expr but never skip parenthesis.\n"
@@ -492,11 +499,12 @@ int main(int argc, char *argv[]) {
 	};
 
 	PrintStyle print_style = PrintExpr;
+	size_t threads = 0;
 
 #ifdef HAS_GET_CPU_COUNT
-	size_t threads = get_cpu_count();
+	bool threads_from_numbers = true;
 #else
-	size_t threads = 0;
+	bool threads_from_numbers = false;
 #endif
 
 	char *endptr = NULL;
@@ -524,9 +532,17 @@ int main(int argc, char *argv[]) {
 
 			case 't':
 				endptr = NULL;
-				threads = strtoul(optarg, &endptr, 10);
-				if (!*optarg || *endptr || threads == 0) {
-					panice("illegal thread count: %s", optarg);
+				if (strcasecmp(optarg, "numbers") == 0) {
+					threads_from_numbers = true;
+					threads = 0;
+				} else if (strcasecmp(optarg, "cpus") == 0) {
+					threads_from_numbers = false;
+					threads = 0;
+				} else {
+					threads = strtoul(optarg, &endptr, 10);
+					if (!*optarg || *endptr || threads == 0) {
+						panice("illegal thread count: %s", optarg);
+					}
 				}
 				break;
 
@@ -554,11 +570,17 @@ int main(int argc, char *argv[]) {
 		panicf("too many numbers: %zu > %u", count, MAX_NUMBERS);
 	}
 
-#ifndef HAS_GET_CPU_COUNT
 	if (threads == 0) {
-		threads = count;
-	}
+		if (threads_from_numbers) {
+			threads = count;
+		} else {
+#ifdef HAS_GET_CPU_COUNT
+			threads = get_cpu_count();
+#else
+			panicf("--threads cpus is not supported on this platform");
 #endif
+		}
+	}
 
 	Number *numbers = calloc(count, sizeof(Number));
 	if (!numbers) {
