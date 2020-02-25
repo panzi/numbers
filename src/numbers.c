@@ -330,9 +330,13 @@ static void solve_ops(NumbersCtx *ctx) {
 }
 
 static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index) {
+	// I thought I could use a max_used_mask instead of tracking used_cout,
+	// but it somehow made it slower!?
 	if (ctx->used_count < ctx->count) {
 		const size_t used = ctx->used;
 		size_t mask = 1 << start_index;
+		// I thought I can move ++/-- ctx->vals_index and ++/-- ctx->used_count
+		// out of the loop, but it made it somehow slower!?
 		for (Index index = start_index; index < end_index; ++ index) {
 			if ((used & mask) == 0) {
 				ctx->used = used | mask;
