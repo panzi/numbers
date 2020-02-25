@@ -48,6 +48,11 @@ typedef struct ElementS {
 	Number value;
 } Element;
 
+typedef struct ValElementS {
+	Number value;
+	size_t ops_index;
+} ValElement;
+
 typedef struct NumbersCtxS {
 	Number           target;
 	const Number    *numbers;
@@ -57,7 +62,7 @@ typedef struct NumbersCtxS {
 	Element         *ops;
 	size_t           ops_size;
 	size_t           ops_index;
-	Number          *vals;
+	ValElement      *vals;
 	size_t           vals_size;
 	size_t           vals_index;
 	PrintStyle       print_style;
@@ -84,8 +89,10 @@ static void print_solution_rpn(const NumbersCtx *ctx) {
 static void push_op(NumbersCtx *ctx, Op op, Number value) {
 	assert(ctx->ops_index < ctx->ops_size);
 
-	ctx->ops[ctx->ops_index].op    = op;
-	ctx->ops[ctx->ops_index].value = value;
+	ctx->ops[ctx->ops_index] = (Element){
+		.op    = op,
+		.value = value,
+	};
 	++ ctx->ops_index;
 }
 
@@ -171,7 +178,7 @@ static void print_solution_expr(const NumbersCtx *ctx) {
 }
 
 static void test_solution(NumbersCtx *ctx) {
-	if (ctx->vals_index == 1 && ctx->target == ctx->vals[0]) {
+	if (ctx->vals_index == 1 && ctx->target == ctx->vals[0].value) {
 		int errnum = 0;
 		if (ctx->iolock) {
 			errnum = pthread_mutex_lock(ctx->iolock);
@@ -204,29 +211,37 @@ static inline void solve_vals(NumbersCtx *ctx) {
 
 static void solve_ops(NumbersCtx *ctx) {
 	if (ctx->vals_index > 1) {
-		const Number lhs = ctx->vals[ctx->vals_index - 2];
-		const Number rhs = ctx->vals[ctx->vals_index - 1];
-		Number value = 0;
-
-		-- ctx->vals_index;
+		const ValElement *lhs_val = &ctx->vals[ctx->vals_index - 2];
+		const ValElement *rhs_val = &ctx->vals[ctx->vals_index - 1];
+		const Number lhs = lhs_val->value;
+		const Number rhs = rhs_val->value;
 
 		if (lhs >= rhs) {
+			const size_t lhs_ops_index = lhs_val->ops_index;
+			const size_t rhs_ops_index = rhs_val->ops_index;
+			const Element *lhs_op = &ctx->ops[lhs_ops_index];
+			const Element *rhs_op = &ctx->ops[rhs_ops_index];
+			Number value = 0;
+
+			-- ctx->vals_index;
 			// intermediate results need to be in descending order
-			const Element *top_op = &ctx->ops[ctx->ops_index - 1];
 			//   discard  ==    use
 			// X Y Z + +  ==  X Y + Z +
 			// X Y Z - +  ==  Y Z - X +
 			// X Y Z + -  ==  X Y - Z -
 			// X Y Z - -  ==  X Y - Z +  EXCEPT FOR WHEN X - Y WOULD BE NEGATIVE!!
 			//                           Negative intermediate results are forbidden.
-			if (top_op->op != OpAdd) {
-				// TODO: find a way to do this for when top_op->op != OpVal
-				if (top_op->op != OpSub && !(top_op->op == OpVal &&
-				      ((ctx->ops[ctx->ops_index - 2].op == OpAdd &&
-				        ctx->ops[ctx->ops_index - 3].value < rhs) ||
-				       (ctx->ops[ctx->ops_index - 2].op == OpSub)))) {
+			if (rhs_op->op != OpAdd) {
+				// XXX: allows more instead of less!? and is slower!!? doesn't prevent what I wanted to prevent!!
+				if (rhs_op->op != OpSub && !(
+					(lhs_op->op == OpAdd && ctx->ops[lhs_ops_index - 1].value < rhs) ||
+					(lhs_op->op == OpSub))) {
 					// chains of additions need to be in descending order
-					value = ctx->vals[ctx->vals_index - 1] = lhs + rhs;
+					value = lhs + rhs;
+					ctx->vals[ctx->vals_index - 1] = (ValElement){
+						.value = value,
+						.ops_index = ctx->ops_index,
+					};
 					push_op(ctx, OpAdd, value);
 					test_solution(ctx);
 					solve_ops(ctx);
@@ -238,17 +253,18 @@ static void solve_ops(NumbersCtx *ctx) {
 				// Z = ctx->ops[ctx->ops_index - 2].value
 				// Y - Z = V
 				// Y = V + Z
-				if ((top_op->op != OpSub || lhs < (rhs + ctx->ops[ctx->ops_index - 2].value)) &&
+				if ((rhs_op->op != OpSub || lhs < (rhs + ctx->ops[rhs_ops_index - 1].value)) &&
 				    lhs != rhs) {
 					// a intermediate result of 0 is useless
-					if (!(top_op->op == OpVal &&
-					      ctx->ops[ctx->ops_index - 2].op == OpSub &&
-					      ctx->ops[ctx->ops_index - 3].value < rhs)) {
+					if (!(lhs_op->op == OpSub && ctx->ops[lhs_ops_index - 1].value < rhs)) {
 						// chains of subdivisions/additions need to be in descending order
 						value = lhs - rhs;
 						if (value != rhs) {
 							// X - Y = Y is just a roundabout way to write Y
-							ctx->vals[ctx->vals_index - 1] = value;
+							ctx->vals[ctx->vals_index - 1] = (ValElement){
+								.value = value,
+								.ops_index = ctx->ops_index,
+							};
 							push_op(ctx, OpSub, value);
 							test_solution(ctx);
 							solve_ops(ctx);
@@ -267,13 +283,15 @@ static void solve_ops(NumbersCtx *ctx) {
 				// X Y Z / *  ==  Y Z / X *
 				// X Y Z * /  ==  X Y / Z /
 				// X Y Z / /  ==  X Y / Z *
-				if (top_op->op != OpMul && top_op->op != OpDiv) {
-					if (!(top_op->op == OpVal &&
-					      ((ctx->ops[ctx->ops_index - 2].op == OpMul &&
-					        ctx->ops[ctx->ops_index - 3].value < rhs) ||
-					       (ctx->ops[ctx->ops_index - 2].op == OpDiv)))) {
+				if (rhs_op->op != OpMul && rhs_op->op != OpDiv) {
+					if (!((lhs_op->op == OpMul && ctx->ops[lhs_ops_index - 1].value < rhs) ||
+					      (lhs_op->op == OpDiv))) {
 						// chains of multiplications need to be in descending order
-						value = ctx->vals[ctx->vals_index - 1] = lhs * rhs;
+						value = lhs * rhs;
+						ctx->vals[ctx->vals_index - 1] = (ValElement){
+							.value = value,
+							.ops_index = ctx->ops_index,
+						};
 						push_op(ctx, OpMul, value);
 						test_solution(ctx);
 						solve_ops(ctx);
@@ -283,14 +301,15 @@ static void solve_ops(NumbersCtx *ctx) {
 
 					if (lhs % rhs == 0) {
 						// only whole numbers as intermediate results allowed
-						if (!(top_op->op == OpVal &&
-						      ctx->ops[ctx->ops_index - 2].op == OpDiv &&
-						      ctx->ops[ctx->ops_index - 3].value < rhs)) {
+						if (!(lhs_op->op == OpDiv && ctx->ops[lhs_ops_index - 1].value < rhs)) {
 							// chains of multiplications/divisions need to be in descending order
 							value = lhs / rhs;
 							if (value != rhs) {
 								// X / Y = Y is just a roundabout way to write Y
-								ctx->vals[ctx->vals_index - 1] = value;
+								ctx->vals[ctx->vals_index - 1] = (ValElement){
+									.value = value,
+									.ops_index = ctx->ops_index,
+								};
 								push_op(ctx, OpDiv, value);
 								test_solution(ctx);
 								solve_ops(ctx);
@@ -301,11 +320,10 @@ static void solve_ops(NumbersCtx *ctx) {
 					}
 				}
 			}
+			++ ctx->vals_index;
+			ctx->vals[ctx->vals_index - 1] = (ValElement){ .value = rhs, .ops_index = rhs_ops_index };
+			ctx->vals[ctx->vals_index - 2] = (ValElement){ .value = lhs, .ops_index = lhs_ops_index };
 		}
-
-		++ ctx->vals_index;
-		ctx->vals[ctx->vals_index - 1] = rhs;
-		ctx->vals[ctx->vals_index - 2] = lhs;
 	}
 }
 
@@ -316,9 +334,12 @@ static void solve_vals_range(NumbersCtx *ctx, size_t start_index, size_t end_ind
 				ctx->used[index] = true;
 				++ ctx->used_count;
 				const Number number = ctx->numbers[index];
-				push_op(ctx, OpVal, number);
 				assert(ctx->vals_index < ctx->vals_size);
-				ctx->vals[ctx->vals_index] = number;
+				ctx->vals[ctx->vals_index] = (ValElement){
+					.value = number,
+					.ops_index = ctx->ops_index,
+				};
+				push_op(ctx, OpVal, number);
 				++ ctx->vals_index;
 
 				test_solution(ctx);
@@ -382,7 +403,7 @@ void solve(const Number target, const Number numbers[], const size_t count, size
 			panice("allocating operand stack of size %zu", ops_size);
 		}
 
-		Number *vals = calloc(vals_size, sizeof(Number));
+		ValElement *vals = calloc(vals_size, sizeof(ValElement));
 		if (!vals) {
 			panice("allocating value stack of size %zu", vals_size);
 		}
