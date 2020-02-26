@@ -38,7 +38,7 @@ Usage
 
 Getting the number of CPU cores is supported on systems that support
 `sysconf(_SC_NPROCESSORS_ONLN)`. On other systems it will take the number
-of numbers as threads. The way threading is implemented this is the
+count as threads. The way threading is implemented this is the
 maximum number of possible threads anyway.
 
 ### Numbers Game Rules
