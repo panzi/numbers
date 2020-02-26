@@ -100,7 +100,7 @@ So now the search for a solution just works as follows:
 * for all unused numbers
   * pop the number on the operation and value stacks
   * call [check solution](#check-solution)
-  * call [solve operations](#solve-operation)
+  * call [solve operations](#solve-operations)
   * call [solve numbers](#solve-numbers)
   * pop the number from the operations and value stack
 
@@ -116,7 +116,7 @@ So now the search for a solution just works as follows:
     * push the operation on the operation stack
     * push the result of the operation on the value stack
     * call [check solution](#check-solution)
-    * call [solve operations](#solve-operation)
+    * call [solve operations](#solve-operations)
     * call [solve numbers](#solve-numbers)
     * pop the operation from operation stack
     * pop the value from the value stack
@@ -221,12 +221,12 @@ like this:
     * copy the state of the current solver
     * spawn a new thread
     * call [check solution](#check-solution)
-    * call [solve operations](#solve-operation)
+    * call [solve operations](#solve-operations)
     * call [solve numbers](#solve-numbers)
     * pop the number from the operations and value stack
   * else on same thread
     * call [check solution](#check-solution)
-    * call [solve operations](#solve-operation)
+    * call [solve operations](#solve-operations)
     * call [solve numbers](#solve-numbers)
     * pop the number from the operations and value stack
 
