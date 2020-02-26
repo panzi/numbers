@@ -138,7 +138,9 @@ The first optimization is just to adhere to the rules of the numbers game:
 Don't push operations that would generate forbidden intermediate results.
 See: [Numbers Game Rules](#numbers-game-rules)
 
-### Further discard operations that:
+### Useless Operations
+
+Discard operations that:
 
 * result in `0`
   * A - A = 0
@@ -148,7 +150,7 @@ See: [Numbers Game Rules](#numbers-game-rules)
   * A * 1 = A
   * A / 1 = A
 
-### Commutative rules:
+### Commutative Rules
 
     1 2 +
 
@@ -160,7 +162,7 @@ Since of the no negative or fractional intermediate results rule we simply
 discard any operations where the left hand side operand is smaller then the
 right hand side operand and make this the first check before everything.
 
-### Associative rules:
+### Associative Rules
 
     1 2 3 + +
 
@@ -181,6 +183,8 @@ drop the operation if:
     this calculation would have a negative intermediate result
 * if top of the stack is `*` or `/`
   * and new operation would be `*` or `/`
+
+### Combined Rules
 
 However, we can do more when combined with commutativity. We want to
 sort our expressions so that in a chain of `+` and `-` operations the
