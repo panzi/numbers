@@ -234,7 +234,6 @@ static void solve_ops(NumbersCtx *ctx) {
 			// X Y Z - -  ==  X Y - Z +  EXCEPT FOR WHEN X - Y WOULD BE NEGATIVE!!
 			//                           Negative intermediate results are forbidden.
 			if (rhs_op->op != OpAdd) {
-				// XXX: allows more instead of less!? and is slower!!? doesn't prevent what I wanted to prevent!!
 				if (rhs_op->op != OpSub && !(
 					(lhs_op->op == OpAdd && ctx->ops[lhs_ops_index - 1].value < rhs) ||
 					(lhs_op->op == OpSub))) {
