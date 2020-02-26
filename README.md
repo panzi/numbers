@@ -197,6 +197,10 @@ Drop operations if:
       right hand operand of the new operation
   * or left hand operand is `/`
 
+**Note:** All of these rules will still give redundant results if a number
+occurs more than once in the game. I don't think it would be woth it to
+optimize for that case.
+
 #### Multithreading
 
 These days computers have many cores, it would be a waste to not use them
