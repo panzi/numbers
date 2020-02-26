@@ -220,8 +220,12 @@ This changes the initial step of the algorithm to:
   * spawn thread
   * call [solve numbers](#solve-numbers) only for the numbers of the bucket
 
-Note that the nested `solve numbers` calls still have to operate on all
+**Note:** The nested `solve numbers` calls still have to operate on all
 numbers.
+
+**Note:** Printing the operant stack need to be protected from concurrency.
+And without buffering the results and then merging them the results will
+appear in basically random order using multithreading.
 
 I'm still working on coming up with a better multithreading strategy. Instead
 of the above one could maybe change the `solve numbers` function to something
