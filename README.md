@@ -3,6 +3,14 @@ numbers
 
 Countdown numbers game solver.
 
+* [Build](#build)
+* [Usage](#usage)
+* [Numbers Game Rules](#numbers-game-rules)
+* [Algorithm](#algorithm)
+* [Optimizations](#optimizations)
+* [Other Resources](#other-resources)
+* [Old Solvers](#old-solvers)
+
 Build
 -----
 
