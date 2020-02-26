@@ -144,7 +144,7 @@ Discard operations that:
 
 * result in `0`
   * A - A = 0
-* result in on of its own operands
+* result in one of its own operands
   * A - B = B
   * A / B = B
   * A * 1 = A
