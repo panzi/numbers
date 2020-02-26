@@ -41,7 +41,8 @@ Getting the number of CPU cores is supported on systems that support
 count as threads. The way threading is implemented this is the
 maximum number of possible threads anyway.
 
-### Numbers Game Rules
+Numbers Game Rules
+------------------
 
 In this "given number" doesn't refer to a certain value of a number, but to
 a number as given in the problem set. The same value may occur more than once
@@ -69,7 +70,8 @@ allocating and freeing memory. This is what sets it apart to my [old numbers
 game solver](https://github.com/panzi/numbers-c) that runs out of memory on my
 16 GB RAM machine when trying to solve a game with 9 numbers.
 
-### Algorithm
+Algorithm
+---------
 
 This uses a calculation strategy that is called reverse Polish notation (RPN).
 Doing math that way doesn't need parenthesis. You build up a stack of values
@@ -103,7 +105,7 @@ So now the search for a solution just works as follows:
 
 * call [solve numbers](#solve-numbers)
 
-#### Solve Numbers
+### Solve Numbers
 
 * for all unused numbers
   * pop the number on the operation and value stacks
@@ -112,12 +114,12 @@ So now the search for a solution just works as follows:
   * call [solve numbers](#solve-numbers)
   * pop the number from the operations and value stack
 
-#### Check Solution
+### Check Solution
 
 * if only one value is on the value stack and it is the target
   * print the operations stack
 
-#### Solve Operations
+### Solve Operations
 
 * if more than one values are on the value stack:
   * for all operations
@@ -129,13 +131,14 @@ So now the search for a solution just works as follows:
     * pop the operation from operation stack
     * pop the value from the value stack
 
-### Optimizations
+Optimizations
+-------------
 
 The first optimization is just to adhere to the rules of the numbers game:
 Don't push operations that would generate forbidden intermediate results.
 See: [Numbers Game Rules](#numbers-game-rules)
 
-#### Further discard operations that:
+### Further discard operations that:
 
 * result in `0`
   * A - A = 0
@@ -145,7 +148,7 @@ See: [Numbers Game Rules](#numbers-game-rules)
   * A * 1 = A
   * A / 1 = A
 
-#### Commutative rules:
+### Commutative rules:
 
     1 2 +
 
@@ -157,7 +160,7 @@ Since of the no negative or fractional intermediate results rule we simply
 discard any operations where the left hand side operand is smaller then the
 right hand side operand and make this the first check before everything.
 
-#### Apply associative rules:
+### Associative rules:
 
     1 2 3 + +
 
@@ -201,7 +204,7 @@ Drop operations if:
 occurs more than once in the game. I don't think it would be woth it to
 optimize for that case.
 
-#### Multithreading
+### Multithreading
 
 These days computers have many cores, it would be a waste to not use them
 all. So instead of running just one solver you can split up the first level
@@ -249,14 +252,16 @@ like this:
 However, that check would happen extremely often and would need to guard
 against concurrency, which could bring the performance down a lot again.
 
-### Other Resources
+Other Resources
+---------------
 
 * http://datagenetics.com/blog/august32014/index.html Strategies to solve the
   Countdown Numbers Game using RPN
 * https://github.com/rvedotrc/numbers Another C implementation of a solver
   using RPN
 
-### Old Solvers
+Old Solvers
+-----------
 
 These are old solvers that I've written that use a worse strategy. See the
 other C implementation for a description.
