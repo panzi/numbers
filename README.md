@@ -210,7 +210,7 @@ number will even finish immediately.
 
 This changes the initial step of the algorithm to:
 
-* split set of numbers into *thread-count* buckets
+* split set of numbers into `thread count` buckets
 * for each bucket
   * create a new solver
   * spawn thread
