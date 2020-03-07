@@ -160,7 +160,8 @@ Is the same as:
 
 Since of the no negative or fractional intermediate results rule we simply
 discard any operations where the left hand side operand is smaller then the
-right hand side operand and make this the first check before everything.
+right hand side operand for any operation and make this the first check
+before everything else.
 
 ### Associative Rules
 
@@ -170,10 +171,9 @@ Is the same as:
 
     1 2 + 3 +
 
-So we need only try one of those. I see the second result as redundant.
-Since it is easy to check if the previous operation is the same as the
-current one we drop those and take the second version. In particular we
-drop the operation if:
+So we need only try one of those. I see doing both as redundant. Since it is
+easy to check if the previous operation is the same as the current one we drop
+those and take the second version. In particular we drop the operation if:
 
 * if top of the stack is `+`
   * and new operation would be `+` or `-`
@@ -184,12 +184,23 @@ drop the operation if:
 * if top of the stack is `*` or `/`
   * and new operation would be `*` or `/`
 
+Written differently, drop if:
+
+* A + (B + C)
+* A + (B - C)
+* A - (B + C)
+* A - (B - C) unless A - B < 0
+* A * (B * C)
+* A * (B / C)
+* A / (B * C)
+* A / (B / C)
+
 ### Combined Rules
 
 However, we can do more when combined with commutativity. We want to
 sort our expressions so that in a chain of `+` and `-` operations the
 operand size decreases and the `-` operations are grouped to the end.
-(Same for chains `*` and `/` operations.)
+(Same for chains of `*` and `/` operations.)
 
 Drop operations if:
 
@@ -203,6 +214,13 @@ Drop operations if:
     * right hand operand of that nested `*` has a smaller value than the
       right hand operand of the new operation
   * or left hand operand is `/`
+
+Written differently, drop if:
+
+* (A + B) + C where B < C
+* (A - B) + C
+* (A * B) * C where B < C
+* (A / B) * C
 
 **Note:** All of these rules will still give redundant results if a number
 occurs more than once in the game. I don't think it would be woth it to
