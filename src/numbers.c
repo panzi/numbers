@@ -484,6 +484,13 @@ static void usage(int argc, char *const argv[]) {
 #endif
 		"\t                          numbers ... use number count\n"
 		"\n"
+		"\t                       Note: Thread count is limited to the number count.\n"
+		"\t                       Meaning in a normal numbers game with 6 numbers only\n"
+		"\t                       6 threads can be utilized.\n"
+		"\n"
+		"\t                       Note: If more than 1 thread is used the order of the\n"
+		"\t                       results is random.\n"
+		"\n"
 		"\t-r, --rpn              Print solutions in reverse Polish notation.\n"
 		"\t-e, --expr             Print solutions in usual notation (default).\n"
 		"\t-p, --paren            Like --expr but never skip parenthesis.\n"

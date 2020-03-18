@@ -32,6 +32,13 @@ Usage
                                   cpus ...... use number of CPUs (CPU cores)
                                   numbers ... use number count
 
+                               Note: Thread count is limited to the number count.
+                               Meaning in a normal numbers game with 6 numbers only
+                               6 threads can be utilized.
+
+                               Note: If more than 1 thread is used the order of the
+                               results is random.
+
         -r, --rpn              Print solutions in reverse Polish notation.
         -e, --expr             Print solutions in usual notation (default).
         -p, --paren            Like --expr but never skip parenthesis.
