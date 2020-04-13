@@ -526,7 +526,7 @@ unsigned long parse_number(const char *str, const char *error_message) {
 	long long value = strtoll(str, &endptr, 10);
 	if (errno != 0) {
 		panice("%s: %s", error_message, str);
-	} else if (!*optarg || *endptr || value <= 0
+	} else if (!*str || *endptr || value <= 0
 #if ULONG_MAX < LLONG_MAX
 		|| value > (long long)ULONG_MAX)
 #endif
