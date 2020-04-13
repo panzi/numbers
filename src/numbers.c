@@ -528,7 +528,7 @@ unsigned long parse_number(const char *str, const char *error_message) {
 		panice("%s: %s", error_message, str);
 	} else if (!*str || *endptr || value <= 0
 #if ULONG_MAX < LLONG_MAX
-		|| value > (long long)ULONG_MAX)
+		|| value > (long long)ULONG_MAX
 #endif
 	) {
 		panicf("%s: %s", error_message, str);
