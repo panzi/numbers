@@ -23,6 +23,7 @@
 #include <getopt.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <limits.h>
 
 #include "panic.h"
 
@@ -645,6 +646,22 @@ static void usage(int argc, char *const argv[]) {
 	);
 }
 
+unsigned long parse_number(const char *str, const char *error_message) {
+	errno = 0;
+	char *endptr = NULL;
+	long long value = strtoll(str, &endptr, 10);
+	if (errno != 0) {
+		panice("%s: %s", error_message, str);
+	} else if (!*optarg || *endptr || value <= 0
+#if ULONG_MAX < LLONG_MAX
+		|| value > (long long)ULONG_MAX)
+#endif
+	) {
+		panicf("%s: %s", error_message, str);
+	}
+	return (unsigned long) value;
+}
+
 int main(int argc, char *argv[]) {
 	struct option long_options[] = {
 		{"help",    no_argument,       0, 'h'},
@@ -664,7 +681,6 @@ int main(int argc, char *argv[]) {
 	bool threads_from_numbers = true;
 #endif
 
-	char *endptr = NULL;
 	for(;;) {
 		int c = getopt_long(argc, argv, "ht:rep", long_options, NULL);
 		if (c == -1)
@@ -688,7 +704,6 @@ int main(int argc, char *argv[]) {
 				break;
 
 			case 't':
-				endptr = NULL;
 				if (strcasecmp(optarg, "numbers") == 0) {
 					threads_from_numbers = true;
 					threads = 0;
@@ -696,10 +711,7 @@ int main(int argc, char *argv[]) {
 					threads_from_numbers = false;
 					threads = 0;
 				} else {
-					threads = strtoul(optarg, &endptr, 10);
-					if (!*optarg || *endptr || threads == 0) {
-						panice("illegal thread count: %s", optarg);
-					}
+					threads = parse_number(optarg, "illegal thread count");
 				}
 				break;
 
@@ -714,11 +726,7 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	endptr = NULL;
-	const Number target = strtoul(argv[optind], &endptr, 10);
-	if (!*argv[optind] || *endptr || target == 0) {
-		panice("target is not a valid numbers game number: %s", argv[optind]);
-	}
+	const Number target = parse_number(argv[optind], "target is not a valid numbers game number");
 	++ optind;
 
 	const size_t count = argc - optind;
@@ -745,12 +753,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	for (int index = optind; index < argc; ++ index) {
-		endptr = NULL;
-		const Number number = strtoul(argv[index], &endptr, 10);
-		if (!*argv[index] || *endptr || number == 0) {
-			panice("number %d is not a valid numbers game number: %s", index, argv[index]);
-		}
-
+		const Number number = parse_number(argv[index], "number is not a valid numbers game number");
 		numbers[index - optind] = number;
 	}
 
