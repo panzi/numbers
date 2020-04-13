@@ -401,9 +401,7 @@ void solve_vals_internal(NumbersCtx *ctx) {
 							}
 						}
 
-						if (thread_index == mngr->thread_count) {
-							panicf("active_count < thread_count, but no non-active thread found!");
-						}
+						assert(thread_index < mngr->thread_count);
 
 						NumbersCtx *other = &mngr->solvers[thread_index];
 						other->used_mask  = ctx->used_mask;
