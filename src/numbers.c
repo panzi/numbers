@@ -533,9 +533,9 @@ int main(int argc, char *argv[]) {
 	size_t threads = 0;
 
 #ifdef HAS_GET_CPU_COUNT
-	bool threads_from_numbers = true;
-#else
 	bool threads_from_numbers = false;
+#else
+	bool threads_from_numbers = true;
 #endif
 
 	char *endptr = NULL;
