@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <getopt.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 #include "panic.h"
 
@@ -72,21 +73,36 @@ typedef struct ValElementS {
 	size_t ops_index;
 } ValElement;
 
+struct ThreadManagerS;
+
 typedef struct NumbersCtxS {
-	Number           target;
-	const Number    *numbers;
-	Index            count;
-	size_t           used;
-	Index            used_count;
-	Element         *ops;
-	Index            ops_size;
-	Index            ops_index;
-	ValElement      *vals;
-	Index            vals_size;
-	Index            vals_index;
-	PrintStyle       print_style;
-	pthread_mutex_t *iolock;
+	Number                 target;
+	const Number          *numbers;
+	Index                  count;
+	size_t                 used_mask;
+	Index                  used_count;
+	Element               *ops;
+	Index                  ops_size;
+	Index                  ops_index;
+	ValElement            *vals;
+	Index                  vals_size;
+	Index                  vals_index;
+	volatile bool          active;
+	volatile bool          alive;
+	struct ThreadManagerS *mngr;
+	pthread_t              thread;
+	sem_t                  semaphore;
 } NumbersCtx;
+
+typedef struct ThreadManagerS {
+	size_t           thread_count;
+	volatile size_t  active_count;
+	NumbersCtx      *solvers;
+	PrintStyle       print_style;
+	pthread_mutex_t  iolock;
+	pthread_mutex_t  worker_lock;
+	sem_t            semaphore;
+} ThreadManager;
 
 static void print_solution_rpn(const NumbersCtx *ctx) {
 	for (Index index = 0; index < ctx->ops_index; ++ index) {
@@ -159,9 +175,9 @@ static void print_expr(const NumbersCtx *ctx, Index index) {
 		const int rhs_precedence  = get_precedence(ctx->ops[index - 1].op);
 
 		const bool left_paren = lhs_precedence < this_precedence ||
-			(ctx->print_style == PrintParen && ctx->ops[lhs_index - 1].op != OpVal);
+			(ctx->mngr->print_style == PrintParen && ctx->ops[lhs_index - 1].op != OpVal);
 		const bool right_paren = rhs_precedence < this_precedence ||
-			(ctx->print_style == PrintParen && ctx->ops[index - 1].op != OpVal);
+			(ctx->mngr->print_style == PrintParen && ctx->ops[index - 1].op != OpVal);
 
 		if (left_paren) {
 			putchar('(');
@@ -198,34 +214,31 @@ static void print_solution_expr(const NumbersCtx *ctx) {
 
 static void test_solution(NumbersCtx *ctx) {
 	if (ctx->vals_index == 1 && ctx->target == ctx->vals[0].value) {
-		int errnum = 0;
-		if (ctx->iolock) {
-			errnum = pthread_mutex_lock(ctx->iolock);
-			if (errnum != 0) {
-				panicf("%s: locking io mutex", strerror(errnum));
-			}
+		int errnum = pthread_mutex_lock(&ctx->mngr->iolock);
+		if (errnum != 0) {
+			panicf("locking io mutex: %s", strerror(errnum));
 		}
 
-		switch (ctx->print_style) {
+		switch (ctx->mngr->print_style) {
 			case PrintRpn:   print_solution_rpn(ctx);  break;
 			case PrintExpr:  print_solution_expr(ctx); break;
 			case PrintParen: print_solution_expr(ctx); break;
 			default: assert(false);
 		}
 
-		if (ctx->iolock) {
-			errnum = pthread_mutex_unlock(ctx->iolock);
-			if (errnum != 0) {
-				panicf("%s: unlocking io mutex", strerror(errnum));
-			}
+		errnum = pthread_mutex_unlock(&ctx->mngr->iolock);
+		if (errnum != 0) {
+			panicf("unlocking io mutex: %s", strerror(errnum));
 		}
 	}
 }
 
-static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index);
+static void solve_vals_internal(NumbersCtx *ctx);
 
 static inline void solve_vals(NumbersCtx *ctx) {
-	solve_vals_range(ctx, 0, ctx->count);
+	if (ctx->used_count < ctx->count) {
+		solve_vals_internal(ctx);
+	}
 }
 
 static void solve_ops(NumbersCtx *ctx) {
@@ -345,51 +358,125 @@ static void solve_ops(NumbersCtx *ctx) {
 	}
 }
 
-static void solve_vals_range(NumbersCtx *ctx, Index start_index, Index end_index) {
+void solve_vals_internal(NumbersCtx *ctx) {
 	// I thought I could use a max_used_mask instead of tracking used_cout,
 	// but it somehow made it slower!?
-	if (ctx->used_count < ctx->count) {
-		const size_t used = ctx->used;
-		size_t mask = 1 << start_index;
-		// I thought I can move ++/-- ctx->vals_index and ++/-- ctx->used_count
-		// out of the loop, but it made it somehow slower!?
-		for (Index index = start_index; index < end_index; ++ index) {
-			if ((used & mask) == 0) {
-				ctx->used = used | mask;
-				++ ctx->used_count;
-				const Number number = ctx->numbers[index];
-				assert(ctx->vals_index < ctx->vals_size);
-				ctx->vals[ctx->vals_index] = (ValElement){
-					.value = number,
-					.ops_index = ctx->ops_index,
-				};
-				push_op(ctx, OpVal, number);
-				++ ctx->vals_index;
+	ThreadManager *mngr = ctx->mngr;
+	const size_t used = ctx->used_mask;
+	const Index count = ctx->count;
+	size_t mask = 1;
+	// I thought I can move ++/-- ctx->vals_index and ++/-- ctx->used_count
+	// out of the loop, but it made it somehow slower!?
+	for (Index index = 0; index < count; ++ index) {
+		if ((used & mask) == 0) {
+			ctx->used_mask = used | mask;
+			++ ctx->used_count;
+			const Number number = ctx->numbers[index];
+			assert(ctx->vals_index < ctx->vals_size);
+			ctx->vals[ctx->vals_index] = (ValElement){
+				.value = number,
+				.ops_index = ctx->ops_index,
+			};
+			push_op(ctx, OpVal, number);
+			++ ctx->vals_index;
 
-				test_solution(ctx);
-				solve_ops(ctx);
-				solve_vals(ctx);
+			test_solution(ctx);
+			solve_ops(ctx);
 
-				-- ctx->vals_index;
-				pop_op(ctx);
-				ctx->used = used;
-				-- ctx->used_count;
+			if (ctx->used_count < ctx->count) {
+				// + 3 prooved to be a good balance to reduce thread communication overhead at recursion leaves
+				if (ctx->used_count + 3 < ctx->count && mngr->active_count < mngr->thread_count) { // fast test
+					int errnum = pthread_mutex_lock(&ctx->mngr->worker_lock);
+					if (errnum != 0) {
+						panicf("locking worker synchronization mutex: %s", strerror(errnum));
+					}
+
+					// safe test
+					const bool fork_solver = mngr->active_count < mngr->thread_count;
+					if (fork_solver) {
+						size_t thread_index = 0;
+						for (; thread_index < mngr->thread_count; ++ thread_index) {
+							if (!mngr->solvers[thread_index].active) {
+								break;
+							}
+						}
+
+						if (thread_index == mngr->thread_count) {
+							panicf("active_count < thread_count, but no non-active thread found!");
+						}
+
+						NumbersCtx *other = &mngr->solvers[thread_index];
+						other->used_mask  = ctx->used_mask;
+						other->used_count = ctx->used_count;
+						other->ops_index  = ctx->ops_index;
+						other->vals_index = ctx->vals_index;
+
+						memcpy(other->ops,  ctx->ops,  sizeof(Element)    * ctx->ops_index);
+						memcpy(other->vals, ctx->vals, sizeof(ValElement) * ctx->vals_index);
+
+						other->active = true;
+						other->mngr->active_count ++;
+
+						if (sem_post(&other->semaphore) != 0) {
+							panice("posting to semaphore of worker thread %zu", thread_index);
+						}
+					}
+
+					errnum = pthread_mutex_unlock(&ctx->mngr->worker_lock);
+					if (errnum != 0) {
+						panicf("unlocking worker synchronization mutex: %s", strerror(errnum));
+					}
+
+					if (!fork_solver) {
+						solve_vals_internal(ctx);
+					}
+				} else {
+					solve_vals_internal(ctx);
+				}
 			}
-			mask <<= 1;
+
+			-- ctx->vals_index;
+			pop_op(ctx);
+			ctx->used_mask = used;
+			-- ctx->used_count;
 		}
+		mask <<= 1;
 	}
 }
 
-typedef struct ThreadCtxS {
-	NumbersCtx ctx;
-	Index start_index;
-	Index end_index;
-	pthread_t thread;
-} ThreadCtx;
-
 static void* worker_proc(void *ptr) {
-	ThreadCtx *worker = (ThreadCtx*)ptr;
-	solve_vals_range(&worker->ctx, worker->start_index, worker->end_index);
+	NumbersCtx *ctx = (NumbersCtx*)ptr;
+	for (;;) {
+		if (sem_wait(&ctx->semaphore) != 0) {
+			panice("worker waiting for work");
+		}
+
+		if (!ctx->alive) {
+			break;
+		}
+
+		solve_vals(ctx);
+
+		int errnum = pthread_mutex_lock(&ctx->mngr->worker_lock);
+		if (errnum != 0) {
+			panicf("locking worker synchronization mutex: %s", strerror(errnum));
+		}
+
+		ctx->active = false;
+		ctx->mngr->active_count --;
+
+		if (ctx->mngr->active_count == 0) {
+			if (sem_post(&ctx->mngr->semaphore) != 0) {
+				panice("posting to thread manager semaphore");
+			}
+		}
+
+		errnum = pthread_mutex_unlock(&ctx->mngr->worker_lock);
+		if (errnum != 0) {
+			panicf("unlocking worker synchronization mutex: %s", strerror(errnum));
+		}
+	}
+
 	return NULL;
 }
 
@@ -402,26 +489,35 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 		panicf("need at least one thread");
 	}
 
-	if (threads > count) {
-		threads = count;
-	}
-
 	const Index ops_size = count + count - 1;
 	const Index vals_size = count;
 
-	ThreadCtx *workers = calloc(threads, sizeof(ThreadCtx));
-	if (!workers) {
+	NumbersCtx *solvers = calloc(threads, sizeof(NumbersCtx));
+	if (!solvers) {
 		panice("allocating contexts %zu", threads);
 	}
 
-	pthread_mutex_t iolock;
-	int errnum = pthread_mutex_init(&iolock, NULL);
+	ThreadManager mngr = {
+		.thread_count = threads,
+		.active_count = 0,
+		.solvers      = solvers,
+		.print_style  = print_style,
+	};
+
+	int errnum = pthread_mutex_init(&mngr.iolock, NULL);
 	if (errnum != 0) {
-		panicf("%s: initializing io mutex", strerror(errnum));
+		panicf("initializing io mutex: %s", strerror(errnum));
 	}
 
-	const size_t stride = 1 + ((count - 1) / threads);
-	size_t index = 0;
+	errnum = pthread_mutex_init(&mngr.worker_lock, NULL);
+	if (errnum != 0) {
+		panicf("initializing worker synchronization mutex: %s", strerror(errnum));
+	}
+
+	if (sem_init(&mngr.semaphore, 0, 0) != 0) {
+		panice("initializing semaphore of thread manager");
+	}
+
 	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
 		Element *ops = calloc(ops_size, sizeof(Element));
 		if (!ops) {
@@ -433,52 +529,88 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 			panice("allocating value stack of size %u", vals_size);
 		}
 
-		ThreadCtx *worker = &workers[thread_index];
-		worker->start_index = index;
-		index += stride;
-		worker->end_index = index;
-		if (worker->end_index > count) {
-			worker->end_index = count;
-		}
+		NumbersCtx *solver = &solvers[thread_index];
 
-		worker->ctx = (NumbersCtx){
+		*solver = (NumbersCtx){
 			.target      = target,
 			.numbers     = numbers,
-			.used        = 0,
-			.used_count  = 0,
 			.count       = count,
+			.used_mask   = 0,
+			.used_count  = 0,
 			.ops         = ops,
 			.ops_size    = ops_size,
 			.ops_index   = 0,
 			.vals        = vals,
 			.vals_size   = vals_size,
 			.vals_index  = 0,
-			.print_style = print_style,
-			.iolock      = &iolock,
+			.active      = false,
+			.alive       = true,
+			.mngr        = &mngr,
 		};
 
-		errnum = pthread_create(&worker->thread, NULL, &worker_proc, worker);
+		if (sem_init(&solver->semaphore, 0, 0) != 0) {
+			panice("initializing semaphore of worker thread %zu", thread_index);
+		}
+
+		errnum = pthread_create(&solver->thread, NULL, &worker_proc, solver);
 		if (errnum != 0) {
-			panicf("%s: starting worker therad %zu", strerror(errnum), thread_index);
+			panicf("starting worker thread %zu: %s", thread_index, strerror(errnum));
+		}
+	}
+
+	solvers[0].active = true;
+	solvers[0].mngr->active_count ++;
+
+	if (sem_post(&solvers[0].semaphore) != 0) {
+		panice("posting to semaphore of worker thread 0");
+	}
+
+	if (sem_wait(&mngr.semaphore) != 0) {
+		panice("waiting on thread manager semaphore");
+	}
+
+	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
+		NumbersCtx *solver = &solvers[thread_index];
+
+		if (solver->alive) {
+			solver->alive = false;
+
+			if (sem_post(&solver->semaphore) != 0) {
+				panice("posting to semaphore of worker thread %zu", thread_index);
+			}
 		}
 	}
 
 	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
-		ThreadCtx *worker = &workers[thread_index];
-		const int errnum = pthread_join(worker->thread, NULL);
+		NumbersCtx *solver = &solvers[thread_index];
+
+		errnum = pthread_join(solver->thread, NULL);
 		if (errnum != 0) {
-			fprintf(stderr, "wating for worker thread to end: %s\n", strerror(errnum));
+			fprintf(stderr, "wating for worker thread %zu to end: %s\n", thread_index, strerror(errnum));
 		}
 
-		free(worker->ctx.ops);
-		free(worker->ctx.vals);
+		if (sem_destroy(&solver->semaphore) != 0) {
+			fprintf(stderr, "freeing semaphore of worker thread %zu: %s\n", thread_index, strerror(errno));
+		}
+
+		free(solver->ops);
+		free(solver->vals);
 	}
 
-	free(workers);
+	free(solvers);
 
-	errnum = pthread_mutex_destroy(&iolock);
+	if (sem_destroy(&mngr.semaphore) != 0) {
+		panice("freeing semaphore of thread manager");
+	}
+
+	errnum = pthread_mutex_destroy(&mngr.worker_lock);
 	if (errnum != 0) {
-		panicf("%s: destroying io mutex", strerror(errnum));
+		panicf("destroying io mutex: %s", strerror(errnum));
+	}
+
+	errnum = pthread_mutex_destroy(&mngr.iolock);
+	if (errnum != 0) {
+		panicf("destroying io mutex: %s", strerror(errnum));
 	}
 }
 
@@ -500,10 +632,6 @@ static void usage(int argc, char *const argv[]) {
 		"\t                          cpus ...... use number of CPUs (CPU cores)\n"
 #endif
 		"\t                          numbers ... use number count\n"
-		"\n"
-		"\t                       Note: Thread count is limited to the number count.\n"
-		"\t                       Meaning in a normal numbers game with 6 numbers only\n"
-		"\t                       6 threads can be utilized.\n"
 		"\n"
 		"\t                       Note: If more than 1 thread is used the order of the\n"
 		"\t                       results is random.\n"
