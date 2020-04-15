@@ -490,6 +490,7 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 
 	const Index ops_size = count + count - 1;
 	const Index vals_size = count;
+	int errnum = 0;
 
 	NumbersCtx *solvers = calloc(threads, sizeof(NumbersCtx));
 	if (!solvers) {
@@ -501,17 +502,9 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 		.active_count = 0,
 		.solvers      = solvers,
 		.print_style  = print_style,
+		.iolock       = PTHREAD_MUTEX_INITIALIZER,
+		.worker_lock  = PTHREAD_MUTEX_INITIALIZER,
 	};
-
-	int errnum = pthread_mutex_init(&mngr.iolock, NULL);
-	if (errnum != 0) {
-		panicf("initializing io mutex: %s", strerror(errnum));
-	}
-
-	errnum = pthread_mutex_init(&mngr.worker_lock, NULL);
-	if (errnum != 0) {
-		panicf("initializing worker synchronization mutex: %s", strerror(errnum));
-	}
 
 	if (sem_init(&mngr.semaphore, 0, 0) != 0) {
 		panice("initializing semaphore of thread manager");
