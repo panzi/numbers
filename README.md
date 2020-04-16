@@ -232,50 +232,49 @@ optimize for that case.
 ### Multithreading
 
 These days computers have many cores, it would be a waste to not use them
-all. So instead of running just one solver you can split up the first level
-(the initial numbers) and instantiate a solver for each split and run them
-concurrently. This is simple and easy to do, but not optimal. It means you
-can only have at most one thread for each number and in praxis these
-different sub problems have a vastly different runtime. This means several
-threads will finish way before the last one. The thread with the lowest
-number will even finish immediately.
+all. In my first attempt of implementing multithreading I did this:
 
-This changes the initial step of the algorithm to:
+Instead of running just one solver the first level (the initial numbers) is
+split up evenly to the number of threads that shall be used. A solver is
+instantiated for each split and run concurrently.
 
-* split set of numbers into `thread count` buckets
-* for each bucket
-  * create a new solver
-  * spawn thread
-  * call [solve numbers](#solve-numbers) only for the numbers of the bucket
+This is simple and easy to do, but not optimal. It means you can only have at
+most one thread for each number and in praxis these different sub problems have
+a vastly different runtime. Several threads will finish way before the last one.
+The thread with the lowest number will even finish pretty much immediately.
 
-**Note:** The nested `solve numbers` calls still have to operate on all
-numbers.
+For a better multithreading implementation the following approach is used:
 
-**Note:** Printing the operant stack need to be protected from concurrency.
-And without buffering the results and then merging them the results will
-appear in basically random order using multithreading.
+* create `thread count` number of threads and make them all wait
+* each thread has an associated solver with initialized state
+* start first thread which will call a [modified solve numbers](#modified-solve-numbers)
 
-I'm still working on coming up with a better multithreading strategy. Instead
-of the above one could maybe change the `solve numbers` function to something
-like this:
+#### Modified Solve Numbers
 
-* for all unused numbers
+* for all unused number
   * pop the number on the operation and value stacks
-  * if less than `maximum thread count` threads are running
-    * copy the state of the current solver
-    * spawn a new thread
-    * call [check solution](#check-solution)
-    * call [solve operations](#solve-operations)
-    * call [solve numbers](#solve-numbers)
-    * pop the number from the operations and value stack
-  * else on same thread
-    * call [check solution](#check-solution)
-    * call [solve operations](#solve-operations)
-    * call [solve numbers](#solve-numbers)
-    * pop the number from the operations and value stack
+  * call [check solution](#check-solution)
+  * call [solve operations](#solve-operations)
+  * if less than `thread count` threads are active
+    * copy the state of the current solver to free thread
+    * start the thread which will call [modified solve numbers](#modified-solve-numbers)
+  * else
+    * call [modified solve numbers](#modified-solve-numbers)
+  * pop the number from the operations and value stack
 
 However, that check would happen extremely often and would need to guard
 against concurrency, which could bring the performance down a lot again.
+Experimenting has showed that a good trade off is to only move work to a
+free thread when there are at least 3 more unused numbers. This might be
+different for problems of larger size.
+
+Also, in my experiments using twice as many threads as cores did still give
+some speed improvements, indicating that this multithreading approach is
+still not 100% optimal.
+
+**Note:** Printing the operand stack needs to be protected from concurrency.
+And without buffering the results and then merging them the results will
+appear in basically random order using multithreading.
 
 Other Resources
 ---------------
