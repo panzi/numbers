@@ -360,7 +360,7 @@ static void solve_ops(NumbersCtx *ctx) {
 }
 
 void solve_vals_internal(NumbersCtx *ctx) {
-	// I thought I could use a max_used_mask instead of tracking used_cout,
+	// I thought I could use a max_used_mask instead of tracking used_count,
 	// but it somehow made it slower!?
 	ThreadManager *mngr = ctx->mngr;
 	const size_t used = ctx->used_mask;
@@ -385,7 +385,7 @@ void solve_vals_internal(NumbersCtx *ctx) {
 			solve_ops(ctx);
 
 			if (ctx->used_count < ctx->count) {
-				// + 3 prooved to be a good balance to reduce thread communication overhead at recursion leaves
+				// + 3 proved to be a good balance to reduce thread communication overhead at recursion leafs
 				if (ctx->used_count + 3 < ctx->count && mngr->active_count < mngr->thread_count) { // fast test
 					int errnum = pthread_mutex_lock(&ctx->mngr->worker_lock);
 					if (errnum != 0) {
