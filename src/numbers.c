@@ -48,8 +48,20 @@ static size_t get_cpu_count() {
 
 typedef uint64_t Number;
 typedef uint16_t Index;
+#define PRIN "lu"
 #define MAX_NUMBERS (sizeof(size_t) * 8)
 
+// for generation:
+const Number NUMBERS[] = {
+	1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10,
+	25, 50, 75, 100,
+};
+#define DEFAULT_NUMBER_COUNT 6
+
+struct TargetRange {
+	Number start;
+	Number end;
+};
 typedef enum OpE {
 	OpVal = '0',
 	OpAdd = '+',
@@ -77,7 +89,7 @@ typedef struct ValElementS {
 struct ThreadManagerS;
 
 typedef struct NumbersCtxS {
-	Number                 target;
+	struct TargetRange     target;
 	const Number          *numbers;
 	Index                  count;
 	size_t                 used_mask;
@@ -111,7 +123,7 @@ static void print_solution_rpn(const NumbersCtx *ctx) {
 			putchar(' ');
 		}
 		switch (ctx->ops[index].op) {
-			case OpVal: printf("%lu", ctx->ops[index].value); break;
+			case OpVal: printf("%" PRIN, ctx->ops[index].value); break;
 			case OpAdd: putchar('+'); break;
 			case OpSub: putchar('-'); break;
 			case OpMul: putchar('*'); break;
@@ -166,7 +178,7 @@ static void print_expr(const NumbersCtx *ctx, Index index) {
 	const Op op = ctx->ops[index].op;
 
 	if (op == OpVal) {
-		printf("%lu", ctx->ops[index].value);
+		printf("%" PRIN, ctx->ops[index].value);
 	} else {
 		assert(index > 0);
 		const Index lhs_index = get_expr_end(ctx, index - 1);
@@ -214,22 +226,29 @@ static void print_solution_expr(const NumbersCtx *ctx) {
 }
 
 static void test_solution(NumbersCtx *ctx) {
-	if (ctx->vals_index == 1 && ctx->target == ctx->vals[0].value) {
-		int errnum = pthread_mutex_lock(&ctx->mngr->iolock);
-		if (errnum != 0) {
-			panicf("locking io mutex: %s", strerror(errnum));
-		}
+	if (ctx->vals_index == 1) {
+		const Number result = ctx->vals[0].value;
+		if (ctx->target.start <= result && ctx->target.end >= result) {
+			int errnum = pthread_mutex_lock(&ctx->mngr->iolock);
+			if (errnum != 0) {
+				panicf("locking io mutex: %s", strerror(errnum));
+			}
 
-		switch (ctx->mngr->print_style) {
-			case PrintRpn:   print_solution_rpn(ctx);  break;
-			case PrintExpr:  print_solution_expr(ctx); break;
-			case PrintParen: print_solution_expr(ctx); break;
-			default: assert(false);
-		}
+			if (ctx->target.start != ctx->target.end) {
+				printf("%" PRIN " = ", result);
+			}
 
-		errnum = pthread_mutex_unlock(&ctx->mngr->iolock);
-		if (errnum != 0) {
-			panicf("unlocking io mutex: %s", strerror(errnum));
+			switch (ctx->mngr->print_style) {
+				case PrintRpn:   print_solution_rpn(ctx);  break;
+				case PrintExpr:  print_solution_expr(ctx); break;
+				case PrintParen: print_solution_expr(ctx); break;
+				default: assert(false);
+			}
+
+			errnum = pthread_mutex_unlock(&ctx->mngr->iolock);
+			if (errnum != 0) {
+				panicf("unlocking io mutex: %s", strerror(errnum));
+			}
 		}
 	}
 }
@@ -331,11 +350,14 @@ static void solve_ops(NumbersCtx *ctx) {
 						pop_op(ctx);
 					}
 
+					// Note: Any good compiler should only generate one div instruction for
+					//       the next two lines, since the reminder is just a byproduct of
+					//       the division.
+					value = lhs / rhs;
 					if (lhs % rhs == 0) {
 						// only whole numbers as intermediate results allowed
 						if (!(lhs_op->op == OpDiv && ctx->ops[lhs_ops_index - 1].value < rhs)) {
 							// chains of multiplications/divisions need to be in descending order
-							value = lhs / rhs;
 							if (value != rhs) {
 								// X / Y = Y is just a roundabout way to write Y
 								ctx->vals[ctx->vals_index - 1] = (ValElement){
@@ -479,7 +501,7 @@ static void* worker_proc(void *ptr) {
 	return NULL;
 }
 
-void solve(const Number target, const Number numbers[], const Index count, size_t threads, PrintStyle print_style) {
+void solve(const struct TargetRange target, const Number numbers[], const Index count, size_t threads, PrintStyle print_style) {
 	if (count == 0) {
 		panicf("need at least one number");
 	}
@@ -607,8 +629,16 @@ void solve(const Number target, const Number numbers[], const Index count, size_
 }
 
 static void usage(int argc, char *const argv[]) {
-	printf("Usage: %s [OPTIONS] TARGET NUMBER...\n", argc > 0 ? argv[0] : "numbers");
+	const char *bin = argc > 0 ? argv[0] : "numbers";
+	printf("Usage: %s [OPTIONS] TARGET NUMBER...\n", bin);
+	printf("       %s --generate [TARGET]\n", bin);
 	printf(
+		"\n"
+		"TARGET may be a single number or an inclusive range in the form START..END.\n"
+		"\n"
+		"EXAMPLE:\n"
+		"\n"
+		"\t%s 100..200 1 2 3 25 50 75\n"
 		"\n"
 		"OPTIONS:\n"
 		"\n"
@@ -631,11 +661,15 @@ static void usage(int argc, char *const argv[]) {
 		"\t-r, --rpn              Print solutions in reverse Polish notation.\n"
 		"\t-e, --expr             Print solutions in usual notation (default).\n"
 		"\t-p, --paren            Like --expr but never skip parenthesis.\n"
+		"\t-g, --generate         Generate standard numbers games with %u numbers and\n"
+		"\t                       their solutions. If no target is given all targets\n"
+		"\t                       from 100 to 999 are iterated over.\n"
 		"\n"
 		"numbers  Copyright (C) 2020  Mathias Panzenböck\n"
 		"This program comes with ABSOLUTELY NO WARRANTY.\n"
 		"This is free software, and you are welcome to redistribute it.\n"
-		"For more details see: https://github.com/panzi/numbers\n"
+		"For more details see: https://github.com/panzi/numbers\n",
+		bin, DEFAULT_NUMBER_COUNT
 	);
 }
 
@@ -655,18 +689,84 @@ unsigned long parse_number(const char *str, const char *error_message) {
 	return (unsigned long) value;
 }
 
+struct TargetRange parse_target_range(const char *target) {
+	struct TargetRange range = { .start = 100, .end = 999 };
+
+	if (!*target) {
+		panicf("target range must not be empty string");
+	}
+
+	const char *target_end = NULL;
+	if (target[0] == '.' && target[1] == '.') {
+		target_end = target + 2;
+		if (*target_end) {
+			range.end = parse_number(target_end, "target range end is not a valid numbers game number");
+		}
+	} else {
+		errno = 0;
+		long long value = strtoll(target, (char**)&target_end, 10);
+
+		if (errno != 0) {
+			panice("target range start is not a valid numbers game number: %s", target);
+		} else if (value <= 0
+#if ULONG_MAX < LLONG_MAX
+			|| value > (long long)ULONG_MAX
+#endif
+		) {
+			panicf("target range start is not a valid numbers game number: %s", target);
+		}
+
+		range.start = value;
+
+		if (target_end[0] == '.' && target_end[1] == '.') {
+			target_end += 2;
+			range.end = parse_number(target_end, "target range end is not a valid numbers game number");
+		} else if (*target_end) {
+			panicf("target range start is not a valid numbers game number: %s", target);
+		} else {
+			range.end = range.start;
+		}
+	}
+
+	return range;
+}
+
+void select_and_solve(Number numbers[], size_t number_index, size_t selection_index_start, struct TargetRange target, size_t threads, PrintStyle print_style) {
+	if (number_index == DEFAULT_NUMBER_COUNT) {
+		if (target.start == target.end) {
+			printf("TARGET=%" PRIN " ", target.start);
+		} else {
+			printf("TARGET=%" PRIN "..%" PRIN " ", target.start, target.end);
+		}
+		printf("NUMBERS=[%" PRIN ", %" PRIN ", %" PRIN ", %" PRIN ", %" PRIN " %" PRIN "]\n",
+			numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5]);
+
+		// TODO: Each thread only has < 50% CPU usage. Maybe because solve()
+		//       actually only takes a tiny amount of time and most of the time is
+		//       spent creating and joining threads?
+		solve(target, numbers, DEFAULT_NUMBER_COUNT, threads, print_style);
+	} else {
+		for (size_t selection_index = selection_index_start; selection_index < (sizeof(NUMBERS) / sizeof(Number));) {
+			numbers[number_index] = NUMBERS[selection_index];
+			select_and_solve(numbers, number_index + 1, ++ selection_index, target, threads, print_style);
+		}
+	}
+}
+
 int main(int argc, char *argv[]) {
 	struct option long_options[] = {
-		{"help",    no_argument,       0, 'h'},
-		{"threads", required_argument, 0, 't'},
-		{"rpn",     no_argument,       0, 'r'},
-		{"expr",    no_argument,       0, 'e'},
-		{"paren",   no_argument,       0, 'p'},
-		{0,         0,                 0,  0 },
+		{"help",     no_argument,       0, 'h'},
+		{"threads",  required_argument, 0, 't'},
+		{"rpn",      no_argument,       0, 'r'},
+		{"expr",     no_argument,       0, 'e'},
+		{"paren",    no_argument,       0, 'p'},
+		{"generate", no_argument,       0, 'g'},
+		{0,          0,                 0,  0 },
 	};
 
 	PrintStyle print_style = PrintExpr;
 	size_t threads = 0;
+	bool generate = false;
 
 #ifdef HAS_GET_CPU_COUNT
 	bool threads_from_numbers = false;
@@ -708,24 +808,36 @@ int main(int argc, char *argv[]) {
 				}
 				break;
 
+			case 'g':
+				generate = true;
+				break;
+
 			case '?':
 				usage(argc, argv);
 				return 1;
 		}
 	}
 
-	if (argc - optind < 2) {
-		usage(argc, argv);
-		return 1;
-	}
+	size_t count = argc - optind;
 
-	const Number target = parse_number(argv[optind], "target is not a valid numbers game number");
-	++ optind;
+	if (generate) {
+		if (count > 1) {
+			panicf("too many arguments");
+		}
+		count = DEFAULT_NUMBER_COUNT;
+	} else {
+		if (count == 0) {
+			panicf("argument TARGET is missing");
+		}
 
-	const size_t count = argc - optind;
+		-- count;
+		if (count == 0) {
+			panicf("need at least one NUMBER argument");
+		}
 
-	if (count > MAX_NUMBERS) {
-		panicf("too many numbers: %zu > %zu", count, MAX_NUMBERS);
+		if (count > MAX_NUMBERS) {
+			panicf("too many numbers: %zu > %zu", count, MAX_NUMBERS);
+		}
 	}
 
 	if (threads == 0) {
@@ -745,12 +857,25 @@ int main(int argc, char *argv[]) {
 		panice("allocating numbers array of size %zu", count);
 	}
 
-	for (int index = optind; index < argc; ++ index) {
-		const Number number = parse_number(argv[index], "number is not a valid numbers game number");
-		numbers[index - optind] = number;
-	}
+	if (generate) {
+		struct TargetRange target = { .start = 100, .end = 999 };
 
-	solve(target, numbers, count, threads, print_style);
+		if (optind < argc) {
+			target = parse_target_range(argv[optind]);
+		}
+
+		select_and_solve(numbers, 0, 0, target, threads, print_style);
+	} else {
+		struct TargetRange target = parse_target_range(argv[optind]);
+		++ optind;
+
+		for (int index = optind; index < argc; ++ index) {
+			const Number number = parse_number(argv[index], "number is not a valid numbers game number");
+			numbers[index - optind] = number;
+		}
+
+		solve(target, numbers, count, threads, print_style);
+	}
 	free(numbers);
 
 	return 0;

@@ -22,22 +22,32 @@ Usage
 -----
 
     Usage: ./build/numbers [OPTIONS] TARGET NUMBER...
-
+           ./build/numbers --generate [TARGET]
+    
+    TARGET may be a single number or an inclusive range in the form START..END.
+    
+    EXAMPLE:
+    
+            ./build/numbers 100..200 1 2 3 25 50 75
+    
     OPTIONS:
-
-        -h, --help             Print this help message.
-        -t, --threads=COUNT    Spawn COUNT threads. (default: cpus)
-
-                               Special COUNT values:
-                                  cpus ...... use number of CPUs (CPU cores)
-                                  numbers ... use number count
-
-                               Note: If more than 1 thread is used the order of the
-                               results is random.
-
-        -r, --rpn              Print solutions in reverse Polish notation.
-        -e, --expr             Print solutions in usual notation (default).
-        -p, --paren            Like --expr but never skip parenthesis.
+    
+            -h, --help             Print this help message.
+            -t, --threads=COUNT    Spawn COUNT threads. (default: cpus)
+    
+                                   Special COUNT values:
+                                      cpus ...... use number of CPUs (CPU cores)
+                                      numbers ... use number count
+    
+                                   Note: If more than 1 thread is used the order of the
+                                   results is random.
+    
+            -r, --rpn              Print solutions in reverse Polish notation.
+            -e, --expr             Print solutions in usual notation (default).
+            -p, --paren            Like --expr but never skip parenthesis.
+            -g, --generate         Generate standard numbers games with 6 numbers and
+                                   their solutions. If no target is given all targets
+                                   from 100 to 999 are iterated over.
 
 Getting the number of CPU cores is supported on systems that support
 `sysconf(_SC_NPROCESSORS_ONLN)`. On other systems it will take the number
