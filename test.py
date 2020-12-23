@@ -5,6 +5,7 @@ from subprocess import Popen, PIPE
 from os.path import abspath, join as joinpath, dirname
 from random import randint, choice
 from time import monotonic
+from typing import List, Union
 
 UINT64_MAX = 0xffff_ffff_ffff_ffff
 TIMEOUT    = 1
@@ -26,9 +27,9 @@ def generate_game(min_size:int=1, max_size:int=7, max_number:int=UINT64_MAX, max
 		raise ValueError('invalid max_number: %r' % max_number)
 	
 	size = randint(min_size, max_size)
-	numbers = []
-	vals = []
-	code = []
+	numbers: List[int] = []
+	vals: List[int] = []
+	code: List[Union[str, int]] = []
 
 	def finished():
 		return (
@@ -134,7 +135,7 @@ def generate_game(min_size:int=1, max_size:int=7, max_number:int=UINT64_MAX, max
 
 def eval(code:list) -> int:
 	ops = code
-	stack = []
+	stack: List[int] = []
 	for op in ops:
 		if op == '+':
 			val = stack.pop()
@@ -166,6 +167,9 @@ def test():
 		target = game['target']
 		numbers = game['numbers']
 		pipe = Popen([binary_path, '--rpn', str(target), *[str(num) for num in numbers]], stdout=PIPE)
+		if pipe.stdout is None:
+			# impossible, but for typing
+			raise TypeError("pipe.stdout is None")
 
 		ok = True
 		def write_fail(msg):
@@ -175,12 +179,12 @@ def test():
 				ok = False
 			sys.stdout.write(f'    {msg}\n')
 
-		code = ' '.join(str(op) for op in game['code'])
+		code: Union[str, int] = ' '.join(str(op) for op in game['code'])
 		sys.stdout.write(f'{testnr}: target={target}, numbers={repr(numbers)}, code={repr(code)}'.ljust(150))
 		sys.stdout.flush()
 		found_solution = False
-		for line in pipe.stdout:
-			line = line.decode().strip()
+		for line_bytes in pipe.stdout:
+			line = line_bytes.decode().strip()
 			if line:
 				try:
 					output_target = eval(line.strip().split())
