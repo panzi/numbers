@@ -429,6 +429,12 @@ void solve_vals_internal(NumbersCtx *ctx) {
 						assert(thread_index < mngr->thread_count);
 
 						NumbersCtx *other = &mngr->solvers[thread_index];
+
+						other->active = true;
+						mngr->active_count ++;
+
+						errnum = pthread_mutex_unlock(&mngr->worker_lock);
+
 						other->used_mask  = ctx->used_mask;
 						other->used_count = ctx->used_count;
 						other->ops_index  = ctx->ops_index;
@@ -437,15 +443,13 @@ void solve_vals_internal(NumbersCtx *ctx) {
 						memcpy(other->ops,  ctx->ops,  sizeof(Element)    * ctx->ops_index);
 						memcpy(other->vals, ctx->vals, sizeof(ValElement) * ctx->vals_index);
 
-						other->active = true;
-						mngr->active_count ++;
-
 						if (sem_post(&other->semaphore) != 0) {
 							panice("posting to semaphore of worker thread %zu", thread_index);
 						}
+					} else {
+						errnum = pthread_mutex_unlock(&mngr->worker_lock);
 					}
 
-					errnum = pthread_mutex_unlock(&mngr->worker_lock);
 					if (errnum != 0) {
 						panicf("unlocking worker synchronization mutex: %s", strerror(errnum));
 					}
@@ -487,17 +491,17 @@ static void* worker_proc(void *ptr) {
 
 		ctx->active = false;
 		assert(ctx->mngr->active_count > 0);
-		ctx->mngr->active_count --;
-
-		if (ctx->mngr->active_count == 0) {
-			if (sem_post(&ctx->mngr->semaphore) != 0) {
-				panice("posting to thread manager semaphore");
-			}
-		}
+		size_t active_count = -- ctx->mngr->active_count;
 
 		errnum = pthread_mutex_unlock(&ctx->mngr->worker_lock);
 		if (errnum != 0) {
 			panicf("unlocking worker synchronization mutex: %s", strerror(errnum));
+		}
+
+		if (active_count == 0) {
+			if (sem_post(&ctx->mngr->semaphore) != 0) {
+				panice("posting to thread manager semaphore");
+			}
 		}
 	}
 
