@@ -411,7 +411,7 @@ void solve_vals_internal(NumbersCtx *ctx) {
 			if (ctx->used_count < ctx->count) {
 				// + 3 proved to be a good balance to reduce thread communication overhead at recursion leafs
 				if (ctx->used_count + 3 < ctx->count && mngr->active_count < mngr->thread_count) { // fast test
-					int errnum = pthread_mutex_lock(&ctx->mngr->worker_lock);
+					int errnum = pthread_mutex_lock(&mngr->worker_lock);
 					if (errnum != 0) {
 						panicf("locking worker synchronization mutex: %s", strerror(errnum));
 					}
@@ -438,14 +438,14 @@ void solve_vals_internal(NumbersCtx *ctx) {
 						memcpy(other->vals, ctx->vals, sizeof(ValElement) * ctx->vals_index);
 
 						other->active = true;
-						other->mngr->active_count ++;
+						mngr->active_count ++;
 
 						if (sem_post(&other->semaphore) != 0) {
 							panice("posting to semaphore of worker thread %zu", thread_index);
 						}
 					}
 
-					errnum = pthread_mutex_unlock(&ctx->mngr->worker_lock);
+					errnum = pthread_mutex_unlock(&mngr->worker_lock);
 					if (errnum != 0) {
 						panicf("unlocking worker synchronization mutex: %s", strerror(errnum));
 					}
