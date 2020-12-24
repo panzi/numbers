@@ -58,10 +58,11 @@ const Number NUMBERS[] = {
 };
 #define DEFAULT_NUMBER_COUNT 6
 
-struct TargetRange {
+typedef struct TargetRangeS {
 	Number start;
 	Number end;
-};
+} TargetRange;
+
 typedef enum OpE {
 	OpVal = '0',
 	OpAdd = '+',
@@ -89,7 +90,7 @@ typedef struct ValElementS {
 struct ThreadManagerS;
 
 typedef struct NumbersCtxS {
-	struct TargetRange     target;
+	TargetRange            target;
 	const Number          *numbers;
 	Index                  count;
 	size_t                 used_mask;
@@ -108,6 +109,7 @@ typedef struct NumbersCtxS {
 } NumbersCtx;
 
 typedef struct ThreadManagerS {
+	Index            number_count;
 	size_t           thread_count;
 	volatile size_t  active_count;
 	NumbersCtx      *solvers;
@@ -484,6 +486,7 @@ static void* worker_proc(void *ptr) {
 		}
 
 		ctx->active = false;
+		assert(ctx->mngr->active_count > 0);
 		ctx->mngr->active_count --;
 
 		if (ctx->mngr->active_count == 0) {
@@ -501,7 +504,37 @@ static void* worker_proc(void *ptr) {
 	return NULL;
 }
 
-void solve(const struct TargetRange target, const Number numbers[], const Index count, size_t threads, PrintStyle print_style) {
+static void thread_manager_create(ThreadManager *mngr, const Index count, const size_t threads, const PrintStyle print_style);
+static void thread_manager_destroy(ThreadManager *mngr);
+
+void solve(ThreadManager *mngr, const TargetRange target, const Number numbers[]) {
+	assert(mngr->active_count == 0);
+
+	for (size_t thread_index = 0; thread_index < mngr->thread_count; ++ thread_index) {
+		NumbersCtx *solver = &mngr->solvers[thread_index];
+		assert(!solver->active);
+
+		solver->target     = target;
+		solver->numbers    = numbers;
+		solver->used_mask  = 0,
+		solver->used_count = 0,
+		solver->ops_index  = 0;
+		solver->vals_index = 0;
+	}
+
+	mngr->solvers[0].active = true;
+	mngr->active_count ++;
+
+	if (sem_post(&mngr->solvers[0].semaphore) != 0) {
+		panice("posting to semaphore of worker thread 0");
+	}
+
+	if (sem_wait(&mngr->semaphore) != 0) {
+		panice("waiting on thread manager semaphore");
+	}
+}
+
+void thread_manager_create(ThreadManager *mngr, const Index count, const size_t threads, const PrintStyle print_style) {
 	if (count == 0) {
 		panicf("need at least one number");
 	}
@@ -512,14 +545,14 @@ void solve(const struct TargetRange target, const Number numbers[], const Index 
 
 	const Index ops_size = count + count - 1;
 	const Index vals_size = count;
-	int errnum = 0;
 
 	NumbersCtx *solvers = calloc(threads, sizeof(NumbersCtx));
 	if (!solvers) {
 		panice("allocating contexts %zu", threads);
 	}
 
-	ThreadManager mngr = {
+	*mngr = (ThreadManager) {
+		.number_count = count,
 		.thread_count = threads,
 		.active_count = 0,
 		.solvers      = solvers,
@@ -528,7 +561,7 @@ void solve(const struct TargetRange target, const Number numbers[], const Index 
 		.worker_lock  = PTHREAD_MUTEX_INITIALIZER,
 	};
 
-	if (sem_init(&mngr.semaphore, 0, 0) != 0) {
+	if (sem_init(&mngr->semaphore, 0, 0) != 0) {
 		panice("initializing semaphore of thread manager");
 	}
 
@@ -546,8 +579,8 @@ void solve(const struct TargetRange target, const Number numbers[], const Index 
 		NumbersCtx *solver = &solvers[thread_index];
 
 		*solver = (NumbersCtx){
-			.target      = target,
-			.numbers     = numbers,
+			.target      = { .start = 0, .end = 0 },
+			.numbers     = NULL,
 			.count       = count,
 			.used_mask   = 0,
 			.used_count  = 0,
@@ -559,32 +592,23 @@ void solve(const struct TargetRange target, const Number numbers[], const Index 
 			.vals_index  = 0,
 			.active      = false,
 			.alive       = true,
-			.mngr        = &mngr,
+			.mngr        = mngr,
 		};
 
 		if (sem_init(&solver->semaphore, 0, 0) != 0) {
 			panice("initializing semaphore of worker thread %zu", thread_index);
 		}
 
-		errnum = pthread_create(&solver->thread, NULL, &worker_proc, solver);
+		int errnum = pthread_create(&solver->thread, NULL, &worker_proc, solver);
 		if (errnum != 0) {
 			panicf("starting worker thread %zu: %s", thread_index, strerror(errnum));
 		}
 	}
+}
 
-	solvers[0].active = true;
-	solvers[0].mngr->active_count ++;
-
-	if (sem_post(&solvers[0].semaphore) != 0) {
-		panice("posting to semaphore of worker thread 0");
-	}
-
-	if (sem_wait(&mngr.semaphore) != 0) {
-		panice("waiting on thread manager semaphore");
-	}
-
-	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
-		NumbersCtx *solver = &solvers[thread_index];
+void thread_manager_destroy(ThreadManager *mngr) {
+	for (size_t thread_index = 0; thread_index < mngr->thread_count; ++ thread_index) {
+		NumbersCtx *solver = &mngr->solvers[thread_index];
 
 		if (solver->alive) {
 			solver->alive = false;
@@ -595,8 +619,9 @@ void solve(const struct TargetRange target, const Number numbers[], const Index 
 		}
 	}
 
-	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
-		NumbersCtx *solver = &solvers[thread_index];
+	int errnum = 0;
+	for (size_t thread_index = 0; thread_index < mngr->thread_count; ++ thread_index) {
+		NumbersCtx *solver = &mngr->solvers[thread_index];
 
 		errnum = pthread_join(solver->thread, NULL);
 		if (errnum != 0) {
@@ -611,18 +636,18 @@ void solve(const struct TargetRange target, const Number numbers[], const Index 
 		free(solver->vals);
 	}
 
-	free(solvers);
+	free(mngr->solvers);
 
-	if (sem_destroy(&mngr.semaphore) != 0) {
+	if (sem_destroy(&mngr->semaphore) != 0) {
 		panice("freeing semaphore of thread manager");
 	}
 
-	errnum = pthread_mutex_destroy(&mngr.worker_lock);
+	errnum = pthread_mutex_destroy(&mngr->worker_lock);
 	if (errnum != 0) {
 		panicf("destroying io mutex: %s", strerror(errnum));
 	}
 
-	errnum = pthread_mutex_destroy(&mngr.iolock);
+	errnum = pthread_mutex_destroy(&mngr->iolock);
 	if (errnum != 0) {
 		panicf("destroying io mutex: %s", strerror(errnum));
 	}
@@ -689,8 +714,8 @@ unsigned long parse_number(const char *str, const char *error_message) {
 	return (unsigned long) value;
 }
 
-struct TargetRange parse_target_range(const char *target) {
-	struct TargetRange range = { .start = 100, .end = 999 };
+TargetRange parse_target_range(const char *target) {
+	TargetRange range = { .start = 100, .end = 999 };
 
 	if (!*target) {
 		panicf("target range must not be empty string");
@@ -731,8 +756,8 @@ struct TargetRange parse_target_range(const char *target) {
 	return range;
 }
 
-void select_and_solve(Number numbers[], size_t number_index, size_t selection_index_start, struct TargetRange target, size_t threads, PrintStyle print_style) {
-	if (number_index == DEFAULT_NUMBER_COUNT) {
+void select_and_solve(ThreadManager *mngr, Number numbers[], size_t number_index, size_t selection_index_start, TargetRange target) {
+	if (number_index == mngr->number_count) {
 		if (target.start == target.end) {
 			printf("TARGET=%" PRIN " ", target.start);
 		} else {
@@ -744,11 +769,11 @@ void select_and_solve(Number numbers[], size_t number_index, size_t selection_in
 		// TODO: Each thread only has < 50% CPU usage. Maybe because solve()
 		//       actually only takes a tiny amount of time and most of the time is
 		//       spent creating and joining threads?
-		solve(target, numbers, DEFAULT_NUMBER_COUNT, threads, print_style);
+		solve(mngr, target, numbers);
 	} else {
 		for (size_t selection_index = selection_index_start; selection_index < (sizeof(NUMBERS) / sizeof(Number));) {
 			numbers[number_index] = NUMBERS[selection_index];
-			select_and_solve(numbers, number_index + 1, ++ selection_index, target, threads, print_style);
+			select_and_solve(mngr, numbers, number_index + 1, ++ selection_index, target);
 		}
 	}
 }
@@ -857,16 +882,19 @@ int main(int argc, char *argv[]) {
 		panice("allocating numbers array of size %zu", count);
 	}
 
+	ThreadManager mngr;
+	thread_manager_create(&mngr, count, threads, print_style);
+
 	if (generate) {
-		struct TargetRange target = { .start = 100, .end = 999 };
+		TargetRange target = { .start = 100, .end = 999 };
 
 		if (optind < argc) {
 			target = parse_target_range(argv[optind]);
 		}
 
-		select_and_solve(numbers, 0, 0, target, threads, print_style);
+		select_and_solve(&mngr, numbers, 0, 0, target);
 	} else {
-		struct TargetRange target = parse_target_range(argv[optind]);
+		TargetRange target = parse_target_range(argv[optind]);
 		++ optind;
 
 		for (int index = optind; index < argc; ++ index) {
@@ -874,8 +902,9 @@ int main(int argc, char *argv[]) {
 			numbers[index - optind] = number;
 		}
 
-		solve(target, numbers, count, threads, print_style);
+		solve(&mngr, target, numbers);
 	}
+	thread_manager_destroy(&mngr);
 	free(numbers);
 
 	return 0;
