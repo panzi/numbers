@@ -49,6 +49,7 @@ static size_t get_cpu_count() {
 typedef uint64_t Number;
 typedef uint16_t Index;
 #define PRIN "lu"
+#define PRII "u"
 #define MAX_NUMBERS (sizeof(size_t) * 8)
 
 // for generation:
@@ -117,9 +118,12 @@ typedef struct ThreadManagerS {
 	pthread_mutex_t  iolock;
 	pthread_mutex_t  worker_lock;
 	sem_t            semaphore;
+	bool             generate;
 } ThreadManager;
 
 static void print_solution_rpn(const NumbersCtx *ctx) {
+//	size_t index = ctx - ctx->mngr->solvers;
+//	printf("(%zu) ", index);
 	for (Index index = 0; index < ctx->ops_index; ++ index) {
 		if (index > 0) {
 			putchar(' ');
@@ -578,12 +582,13 @@ void generate(ThreadManager *mngr, const TargetRange target, const Number number
 		if (thread_index < mngr->thread_count) {
 			NumbersCtx *solver = &mngr->solvers[thread_index];
 			solver->target     = target;
-			solver->numbers    = numbers;
 			solver->used_mask  = 0,
 			solver->used_count = 0,
 			solver->ops_index  = 0;
 			solver->vals_index = 0;
 			solver->active     = true;
+
+			memcpy((void*) solver->numbers, numbers, mngr->number_count * sizeof(Number));
 			break;
 		} else {
 			if (sem_wait(&mngr->semaphore) != 0) {
@@ -622,6 +627,7 @@ void thread_manager_create(ThreadManager *mngr, const Index count, const size_t 
 		.print_style     = print_style,
 		.iolock          = PTHREAD_MUTEX_INITIALIZER,
 		.worker_lock     = PTHREAD_MUTEX_INITIALIZER,
+		.generate        = generate,
 	};
 
 	if (sem_init(&mngr->semaphore, 0, 0) != 0) {
@@ -659,6 +665,14 @@ void thread_manager_create(ThreadManager *mngr, const Index count, const size_t 
 			.alive       = true,
 			.mngr        = mngr,
 		};
+
+		if (generate) {
+			Number *numbers = calloc(count, sizeof(Number));
+			if (!numbers) {
+				panice("allocating numbers array of size %" PRII, count);
+			}
+			solver->numbers = numbers;
+		}
 
 		if (sem_init(&solver->semaphore, 0, 0) != 0) {
 			panice("initializing semaphore of worker thread %zu", thread_index);
@@ -699,6 +713,10 @@ void thread_manager_destroy(ThreadManager *mngr) {
 
 		free(solver->ops);
 		free(solver->vals);
+
+		if (mngr->generate) {
+			free((void*)solver->numbers);
+		}
 	}
 
 	free(mngr->solvers);
@@ -828,7 +846,7 @@ void select_and_solve(ThreadManager *mngr, Number numbers[], size_t number_index
 		} else {
 			printf("TARGET=%" PRIN "..%" PRIN " ", target.start, target.end);
 		}
-		printf("NUMBERS=[%" PRIN ", %" PRIN ", %" PRIN ", %" PRIN ", %" PRIN " %" PRIN "]\n",
+		printf("NUMBERS=[%" PRIN ", %" PRIN ", %" PRIN ", %" PRIN ", %" PRIN ", %" PRIN "]\n",
 			numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5]);
 
 		// TODO: Each thread only has < 50% CPU usage. Maybe because solve()
