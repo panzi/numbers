@@ -111,7 +111,7 @@ typedef struct NumbersCtxS {
 typedef struct ThreadManagerS {
 	Index            number_count;
 	size_t           thread_count;
-	volatile size_t  active_count;
+	volatile size_t  available_count;
 	NumbersCtx      *solvers;
 	PrintStyle       print_style;
 	pthread_mutex_t  iolock;
@@ -410,14 +410,14 @@ void solve_vals_internal(NumbersCtx *ctx) {
 
 			if (ctx->used_count < ctx->count) {
 				// + 3 proved to be a good balance to reduce thread communication overhead at recursion leafs
-				if (ctx->used_count + 3 < ctx->count && mngr->active_count < mngr->thread_count) { // fast test
+				if (ctx->used_count + 3 < ctx->count && mngr->available_count > 0) { // fast test
 					int errnum = pthread_mutex_lock(&mngr->worker_lock);
 					if (errnum != 0) {
 						panicf("locking worker synchronization mutex: %s", strerror(errnum));
 					}
 
 					// safe test
-					const bool fork_solver = mngr->active_count < mngr->thread_count;
+					const bool fork_solver = mngr->available_count > 0;
 					if (fork_solver) {
 						size_t thread_index = 0;
 						for (; thread_index < mngr->thread_count; ++ thread_index) {
@@ -431,7 +431,7 @@ void solve_vals_internal(NumbersCtx *ctx) {
 						NumbersCtx *other = &mngr->solvers[thread_index];
 
 						other->active = true;
-						mngr->active_count ++;
+						mngr->available_count --;
 
 						errnum = pthread_mutex_unlock(&mngr->worker_lock);
 
@@ -490,15 +490,15 @@ static void* worker_proc(void *ptr) {
 		}
 
 		ctx->active = false;
-		assert(ctx->mngr->active_count > 0);
-		size_t active_count = -- ctx->mngr->active_count;
+		assert(ctx->mngr->available_count < ctx->mngr->thread_count);
+		const size_t available_count = ++ ctx->mngr->available_count;
 
 		errnum = pthread_mutex_unlock(&ctx->mngr->worker_lock);
 		if (errnum != 0) {
 			panicf("unlocking worker synchronization mutex: %s", strerror(errnum));
 		}
 
-		if (active_count == 0) {
+		if (available_count == ctx->mngr->thread_count) {
 			if (sem_post(&ctx->mngr->semaphore) != 0) {
 				panice("posting to thread manager semaphore");
 			}
@@ -512,7 +512,7 @@ static void thread_manager_create(ThreadManager *mngr, const Index count, const 
 static void thread_manager_destroy(ThreadManager *mngr);
 
 void solve(ThreadManager *mngr, const TargetRange target, const Number numbers[]) {
-	assert(mngr->active_count == 0);
+	assert(mngr->available_count == mngr->thread_count);
 
 	for (size_t thread_index = 0; thread_index < mngr->thread_count; ++ thread_index) {
 		NumbersCtx *solver = &mngr->solvers[thread_index];
@@ -527,7 +527,7 @@ void solve(ThreadManager *mngr, const TargetRange target, const Number numbers[]
 	}
 
 	mngr->solvers[0].active = true;
-	mngr->active_count ++;
+	mngr->available_count --;
 
 	if (sem_post(&mngr->solvers[0].semaphore) != 0) {
 		panice("posting to semaphore of worker thread 0");
@@ -556,13 +556,13 @@ void thread_manager_create(ThreadManager *mngr, const Index count, const size_t 
 	}
 
 	*mngr = (ThreadManager) {
-		.number_count = count,
-		.thread_count = threads,
-		.active_count = 0,
-		.solvers      = solvers,
-		.print_style  = print_style,
-		.iolock       = PTHREAD_MUTEX_INITIALIZER,
-		.worker_lock  = PTHREAD_MUTEX_INITIALIZER,
+		.number_count    = count,
+		.thread_count    = threads,
+		.available_count = threads,
+		.solvers         = solvers,
+		.print_style     = print_style,
+		.iolock          = PTHREAD_MUTEX_INITIALIZER,
+		.worker_lock     = PTHREAD_MUTEX_INITIALIZER,
 	};
 
 	if (sem_init(&mngr->semaphore, 0, 0) != 0) {
