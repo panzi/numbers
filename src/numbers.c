@@ -235,6 +235,9 @@ static void test_solution(NumbersCtx *ctx) {
 	if (ctx->vals_index == 1) {
 		const Number result = ctx->vals[0].value;
 		if (ctx->target.start <= result && ctx->target.end >= result) {
+			// XXX: For --generate a lot of time is spent waiting for this lock when generating!
+			//      For solving the difference barely matters.
+			// TODO: print into different streams so there is no concurrency?
 			int errnum = pthread_mutex_lock(&ctx->mngr->iolock);
 			if (errnum != 0) {
 				panicf("locking io mutex: %s", strerror(errnum));
@@ -975,6 +978,8 @@ int main(int argc, char *argv[]) {
 			target = parse_target_range(argv[optind]);
 		}
 
+		// XXX: --generate needs to be written differntly, because TARGET=100 with
+		//      NUMBERS=[100, a, b, c, d, e] has 1287 solutions that are all just the nubmer 100.
 		select_and_solve(&mngr, numbers, 0, 0, target);
 
 		for (;;) {
