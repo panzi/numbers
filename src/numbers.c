@@ -471,7 +471,7 @@ void solve_vals_internal(NumbersCtx *ctx) {
 	}
 }
 
-static void* worker_proc(void *ptr) {
+static void* worker_proc_solve(void *ptr) {
 	NumbersCtx *ctx = (NumbersCtx*)ptr;
 	for (;;) {
 		if (sem_wait(&ctx->semaphore) != 0) {
@@ -508,7 +508,30 @@ static void* worker_proc(void *ptr) {
 	return NULL;
 }
 
-static void thread_manager_create(ThreadManager *mngr, const Index count, const size_t threads, const PrintStyle print_style);
+static void* worker_proc_generate(void *ptr) {
+	NumbersCtx *ctx = (NumbersCtx*)ptr;
+	for (;;) {
+		if (sem_wait(&ctx->semaphore) != 0) {
+			panice("worker waiting for work");
+		}
+
+		if (!ctx->alive) {
+			break;
+		}
+
+		solve_vals(ctx);
+
+		ctx->active = false;
+
+		if (sem_post(&ctx->mngr->semaphore) != 0) {
+			panice("posting to thread manager semaphore");
+		}
+	}
+
+	return NULL;
+}
+
+static void thread_manager_create(ThreadManager *mngr, const Index count, const size_t threads, const PrintStyle print_style, bool generate);
 static void thread_manager_destroy(ThreadManager *mngr);
 
 void solve(ThreadManager *mngr, const TargetRange target, const Number numbers[]) {
@@ -538,7 +561,43 @@ void solve(ThreadManager *mngr, const TargetRange target, const Number numbers[]
 	}
 }
 
-void thread_manager_create(ThreadManager *mngr, const Index count, const size_t threads, const PrintStyle print_style) {
+void generate(ThreadManager *mngr, const TargetRange target, const Number numbers[]) {
+	assert(mngr->available_count == 0);
+
+	size_t thread_index = 0;
+
+	for (;;) {
+		for (thread_index = 0; thread_index < mngr->thread_count; ++ thread_index) {
+			NumbersCtx *solver = &mngr->solvers[thread_index];
+
+			if (!solver->active) {
+				break;
+			}
+		}
+
+		if (thread_index < mngr->thread_count) {
+			NumbersCtx *solver = &mngr->solvers[thread_index];
+			solver->target     = target;
+			solver->numbers    = numbers;
+			solver->used_mask  = 0,
+			solver->used_count = 0,
+			solver->ops_index  = 0;
+			solver->vals_index = 0;
+			solver->active     = true;
+			break;
+		} else {
+			if (sem_wait(&mngr->semaphore) != 0) {
+				panice("waiting on thread manager semaphore");
+			}
+		}
+	}
+
+	if (sem_post(&mngr->solvers[thread_index].semaphore) != 0) {
+		panice("posting to semaphore of worker thread 0");
+	}
+}
+
+void thread_manager_create(ThreadManager *mngr, const Index count, const size_t threads, const PrintStyle print_style, bool generate) {
 	if (count == 0) {
 		panicf("need at least one number");
 	}
@@ -558,7 +617,7 @@ void thread_manager_create(ThreadManager *mngr, const Index count, const size_t 
 	*mngr = (ThreadManager) {
 		.number_count    = count,
 		.thread_count    = threads,
-		.available_count = threads,
+		.available_count = generate ? 0 : threads,
 		.solvers         = solvers,
 		.print_style     = print_style,
 		.iolock          = PTHREAD_MUTEX_INITIALIZER,
@@ -568,6 +627,8 @@ void thread_manager_create(ThreadManager *mngr, const Index count, const size_t 
 	if (sem_init(&mngr->semaphore, 0, 0) != 0) {
 		panice("initializing semaphore of thread manager");
 	}
+
+	void* (*worker_proc)(void *) = generate ? &worker_proc_generate : &worker_proc_solve;
 
 	for (size_t thread_index = 0; thread_index < threads; ++ thread_index) {
 		Element *ops = calloc(ops_size, sizeof(Element));
@@ -603,7 +664,7 @@ void thread_manager_create(ThreadManager *mngr, const Index count, const size_t 
 			panice("initializing semaphore of worker thread %zu", thread_index);
 		}
 
-		int errnum = pthread_create(&solver->thread, NULL, &worker_proc, solver);
+		int errnum = pthread_create(&solver->thread, NULL, worker_proc, solver);
 		if (errnum != 0) {
 			panicf("starting worker thread %zu: %s", thread_index, strerror(errnum));
 		}
@@ -773,7 +834,7 @@ void select_and_solve(ThreadManager *mngr, Number numbers[], size_t number_index
 		// TODO: Each thread only has < 50% CPU usage. Maybe because solve()
 		//       actually only takes a tiny amount of time and most of the time is
 		//       spent creating and joining threads?
-		solve(mngr, target, numbers);
+		generate(mngr, target, numbers);
 	} else {
 		for (size_t selection_index = selection_index_start; selection_index < (sizeof(NUMBERS) / sizeof(Number));) {
 			numbers[number_index] = NUMBERS[selection_index];
@@ -887,7 +948,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	ThreadManager mngr;
-	thread_manager_create(&mngr, count, threads, print_style);
+	thread_manager_create(&mngr, count, threads, print_style, generate);
 
 	if (generate) {
 		TargetRange target = { .start = 100, .end = 999 };
@@ -897,6 +958,26 @@ int main(int argc, char *argv[]) {
 		}
 
 		select_and_solve(&mngr, numbers, 0, 0, target);
+
+		for (;;) {
+			size_t thread_index = 0;
+			for (thread_index = 0; thread_index < mngr.thread_count; ++ thread_index) {
+				NumbersCtx *solver = &mngr.solvers[thread_index];
+
+				if (solver->active) {
+					break;
+				}
+			}
+
+			if (thread_index < mngr.thread_count) {
+				if (sem_wait(&mngr.semaphore) != 0) {
+					panice("waiting on thread manager semaphore");
+				}
+			} else {
+				break;
+			}
+		}
+
 	} else {
 		TargetRange target = parse_target_range(argv[optind]);
 		++ optind;
