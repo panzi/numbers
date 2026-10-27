@@ -601,7 +601,7 @@ void generate(ThreadManager *mngr, const TargetRange target, const Number number
 	}
 
 	if (sem_post(&mngr->solvers[thread_index].semaphore) != 0) {
-		panice("posting to semaphore of worker thread 0");
+		panice("posting to semaphore of worker thread %zu", thread_index);
 	}
 }
 
